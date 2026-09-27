@@ -3,7 +3,7 @@
 body { margin: 0; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
 .skip { position: absolute; left: -9999px; }
 .skip:focus { left: 1rem; top: 1rem; z-index: 5; background: white; padding: .5rem; }
-/* 머리 줄 하나: 이름 · 문서 · 상태 · 저장. 긴 문서 경로와 상태는 한 줄로 자르고(title에 전체) 저장 버튼은 줄지 않는다. */
+/* 머리 줄 하나: 이름 · 문서 · 경로 복사 · 상태 · 저장. 긴 문서 경로와 상태는 한 줄로 자른다. */
 header { flex: none; display: flex; gap: .9rem; align-items: center; min-height: 2.75rem; padding: .3rem .6rem .3rem 1rem; background: white; border-bottom: 1px solid #d7dce2; }
 h1 { flex: none; margin: 0; font-size: 1.05rem; }
 #filename { flex: 0 1 auto; min-width: 0; max-width: 40%; font-size: .92rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -65,6 +65,7 @@ button:focus-visible { outline: 3px solid #1266a3; outline-offset: 2px; }
 button:disabled { cursor: not-allowed; opacity: .5; }
 main { min-width: 0; background: white; }
 #save { flex: none; min-width: 4.5rem; min-height: 2rem; border: 0; color: white; background: #165a91; }
+#copy-path { flex: none; min-height: 2rem; padding: 0 .65rem; border: 1px solid #b8c5d3; color: #165a91; background: white; }
 #studio { flex: 1; min-height: 0; }
 #studio > iframe { display: block; } /* 인라인 iframe의 기준선 틈(4px)이 페이지를 창보다 키우지 않게 */
 main { position: relative; }

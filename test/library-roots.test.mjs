@@ -42,6 +42,21 @@ async function fixture(t) {
   return { root, docs, extra, stateDir, registry, added, id, start };
 }
 const docUrl = (base, id) => `${base}/api/docs/${encodeURIComponent(id)}`;
+
+test('GET external /path returns its exact realpath without creating .git in the source', async t => {
+  const f = await fixture(t);
+  const { base } = await f.start();
+  const noGit = () => stat(join(f.extra, '.git')).then(() => false, error => error.code === 'ENOENT');
+  assert.equal(await noGit(), true);
+  const response = await fetch(`${docUrl(base, f.id)}/path`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await response.json(), { path: await realpath(join(f.extra, 'a.hwpx')) });
+  assert.equal(await noGit(), true);
+  const rejected = await fetch(`${docUrl(base, f.id)}/path`, { method: 'POST' });
+  assert.equal(rejected.status, 405);
+  assert.equal((await rejected.json()).error.code, 'METHOD_NOT_ALLOWED');
+});
 async function putDocument(base, id, bytes) {
   const get = await fetch(docUrl(base, id));
   const claim = await fetch(base + '/api/tabs', { method: 'POST', headers: { 'Content-Type': 'application/json' },

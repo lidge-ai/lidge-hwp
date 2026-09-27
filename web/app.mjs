@@ -1,6 +1,7 @@
 import { createStudio } from '/editor/index.js';
 import { startAgentChannel } from '/agent-channel.mjs';
 import { followSwitch } from '/follow-switch.mjs';
+import { copyPath, isCopyPathShortcut } from '/copy-path.mjs';
 import { initSidebar } from '/sidebar.mjs';
 import { groupDocs, groupKeyOf, matchDoc, renderProjects, readCollapsedGroups, writeCollapsedGroups, bindListKeys, displayName } from '/projects.mjs';
 
@@ -16,6 +17,7 @@ const externalList = document.querySelector('#external-docs');
 const status = document.querySelector('#status');
 const filename = document.querySelector('#filename');
 const saveButton = document.querySelector('#save');
+const copyPathButton = document.querySelector('#copy-path');
 let studio;
 let current = null;
 let saving = false;
@@ -23,6 +25,7 @@ let agentLocked = false;
 let opening = 0;                   // 줄에 선 openDoc 수. AI 전환 판정(canFollow)이 본다
 let openQueue = Promise.resolve(); // 사람 클릭과 AI 전환(agent.follow)을 한 줄로 세운다
 const setSaveLocked = on => { agentLocked = on; saveButton.disabled = on || saving || !current; };
+function syncCopyPathButton() { copyPathButton.disabled = !current; }
 
 function say(message) { status.textContent = message; status.title = message; } // 한 줄로 잘려도 전체는 title로
 
@@ -81,6 +84,7 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
       return false;
     }
     current = null;
+    syncCopyPathButton();
     saveButton.disabled = true;
   }
   try {
@@ -135,6 +139,7 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
       onFollow: (targetId, token) => openDoc(targetId, { reservation: token, agent: true }),
     });
     current = next;
+    syncCopyPathButton();
     delete document.body.dataset.noDocument;
     studio.element.inert = false;
     filename.textContent = nameOf(id); filename.title = id;
@@ -153,6 +158,7 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
     // AI 전환이면 runner가 FOLLOW_LOAD_FAILED로 알아채고, followSwitch가 예약을 돌려준다.
     if (next && current !== next) await release(next).catch(() => {});
     if (!current) {
+      syncCopyPathButton();
       // 이전 문서는 이미 반납했다. 화면에 남은 옛 문서를 편집·저장할 수 없게 덮고, 목록에서 다시 고르게 한다.
       filename.textContent = ''; filename.title = '';
       saveButton.disabled = true;
@@ -308,6 +314,7 @@ function renameDoc(id, name, input) {
   const detach = tab => {
     tab?.events?.close();
     current = null;
+    syncCopyPathButton();
     saveButton.disabled = true;
     document.body.dataset.noDocument = 'true';
     studio.element.inert = true;
@@ -375,6 +382,20 @@ function renameDoc(id, name, input) {
   openQueue = run.catch(() => {});
   return run;
 }
+const targetForDocumentAction = () => {
+  const focused = document.activeElement?.closest?.('.doc-row')?.querySelector('.doc[data-id]')
+    ?? document.activeElement?.closest?.('.doc[data-id]');
+  return focused?.dataset.id ?? current?.id ?? null;
+};
+const copyDocumentPath = id => copyPath(id, { request: api, clipboard: navigator.clipboard, say });
+document.addEventListener('keydown', event => {
+  if (event.isComposing || event.target?.isContentEditable
+      || /^(INPUT|TEXTAREA)$/.test(event.target?.tagName || '')) return;
+  if (!isCopyPathShortcut(event)) return;
+  event.preventDefault();
+  void copyDocumentPath(targetForDocumentAction());
+});
+copyPathButton.addEventListener('click', () => { void copyDocumentPath(current?.id ?? null); });
 document.addEventListener('keydown', event => {
   const cmd = event.metaKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'r';
   const f2 = event.key === 'F2' && !event.metaKey && !event.ctrlKey && !event.altKey;
