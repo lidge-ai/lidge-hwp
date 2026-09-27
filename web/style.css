@@ -65,6 +65,9 @@ button:focus-visible { outline: 3px solid #1266a3; outline-offset: 2px; }
 button:disabled { cursor: not-allowed; opacity: .5; }
 main { min-width: 0; background: white; }
 #save { flex: none; min-width: 4.5rem; min-height: 2rem; border: 0; color: white; background: #165a91; }
+#new-doc { flex:none; min-height:2rem; padding:0 .7rem; border:1px solid #165a91; background:white; color:#165a91; }
+#docs .new-doc-row { display:flex; padding:.1rem .2rem; }
+#docs .new-doc-row input { flex:1; min-width:0; min-height:1.75rem; padding:0 .45rem; font:inherit; border:1px solid #165a91; border-radius:.3rem; background:white; }
 #copy-path { flex: none; min-height: 2rem; padding: 0 .65rem; border: 1px solid #b8c5d3; color: #165a91; background: white; }
 #studio { flex: 1; min-height: 0; }
 #studio > iframe { display: block; } /* 인라인 iframe의 기준선 틈(4px)이 페이지를 창보다 키우지 않게 */

@@ -1,6 +1,7 @@
 import { persistDocument, indexEntry, restoreIndex } from '../lib/persist.mjs';
 import { commitFile } from '../lib/git.mjs';
-import { matchesFormat } from '../lib/docstore.mjs';
+import { matchesFormat, validateSegment } from '../lib/docstore.mjs';
+import { createBlankHwpBytes } from '../lib/rhwp-node.mjs';
 import { AGENT_PUT_HOLD_MS } from '../lib/config.mjs';
 import { verifyAgentBytes } from '../lib/signature.mjs';
 const send = (res, status, value) => {
@@ -24,6 +25,41 @@ async function body(req, maxBytes) {
 export function createDocsApi({ store, tabs, pickFolder }) {
   let pickInFlight = false;
   async function handle(req, res, pathname) {
+    if (pathname === '/api/docs' && req.method === 'POST') {
+      try {
+        if (req.headers['content-type']?.split(';')[0] !== 'application/json') {
+          error(res, 415, 'INVALID_CONTENT_TYPE'); return true;
+        }
+        const data = JSON.parse((await body(req, 8192)).toString('utf8'));
+        const group = data?.group;
+        if (!data || typeof data !== 'object' || Array.isArray(data)
+            || !group || typeof group !== 'object' || Array.isArray(group)
+            || !['default', 'project', 'external'].includes(group.kind)
+            || (group.kind === 'project' && typeof group.name !== 'string')
+            || (group.kind === 'external' && typeof group.key !== 'string')) {
+          error(res, 400, 'INVALID_GROUP'); return true;
+        }
+        const requested = data.name === undefined ? null : validateSegment(data.name);
+        if (requested && !requested.toLowerCase().endsWith('.hwp')) {
+          error(res, 400, 'INVALID_FORMAT'); return true;
+        }
+        const bytes = await createBlankHwpBytes();
+        for (let n = 1; n <= 10000; n += 1) {
+          const name = requested ?? (n === 1 ? '새 문서.hwp' : `새 문서 ${n}.hwp`);
+          try { send(res, 201, await store.createDocument(group, name, bytes)); return true; }
+          catch (cause) {
+            if ((cause.code === 'DOC_EXISTS' || cause.code === 'DOCUMENT_LOCKED') && !requested) continue;
+            throw cause;
+          }
+        }
+        error(res, 409, 'NAME_EXHAUSTED');
+      } catch (cause) {
+        const status = cause instanceof SyntaxError ? 400 : cause.status || 500;
+        const code = cause instanceof SyntaxError ? 'INVALID_JSON' : cause.code || 'CREATE_FAILED';
+        error(res, status, code);
+      }
+      return true;
+    }
     if (pathname === '/api/roots/pick') {
       if (req.method !== 'POST') { error(res, 405, 'METHOD_NOT_ALLOWED'); return true; }
       if (pickInFlight) { error(res, 409, 'PICK_IN_PROGRESS'); return true; }

@@ -1,6 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { groupDocs, groupKeyOf, matchDoc, readCollapsedGroups, renderProjects, displayName } from '../web/projects.mjs';
+import { groupDocs, groupKeyOf, createGroupFor, matchDoc, readCollapsedGroups, renderProjects, displayName } from '../web/projects.mjs';
+import { isNewDocShortcut } from '../web/new-doc.mjs';
+
+test('selected group outranks current then default', () => {
+  const key = '123e4567-e89b-42d3-a456-426614174000';
+  const groups = [
+    { key: 'P', label: 'P', kind: 'primary' },
+    { key: `ext://${key}`, label: '외부', kind: 'external' },
+  ];
+  assert.deepEqual(createGroupFor(groups, `ext://${key}`, 'P/old.hwp'), { kind: 'external', key });
+  assert.deepEqual(createGroupFor(groups, null, 'P/old.hwp'), { kind: 'project', name: 'P' });
+  assert.deepEqual(createGroupFor(groups, null, null), { kind: 'default' });
+});
+
+test('new document shortcut accepts dead key but ignores composing and modified or editable targets', () => {
+  const shortcut = { metaKey: true, altKey: true, code: 'KeyN', key: 'Dead' };
+  assert.equal(isNewDocShortcut(shortcut), true);
+  assert.equal(isNewDocShortcut({ ...shortcut, isComposing: true }), false);
+  assert.equal(isNewDocShortcut({ ...shortcut, shiftKey: true }), false);
+  assert.equal(isNewDocShortcut({ ...shortcut, ctrlKey: true }), false);
+  assert.equal(isNewDocShortcut({ ...shortcut, target: { tagName: 'INPUT' } }), false);
+  assert.equal(isNewDocShortcut({ ...shortcut, target: { isContentEditable: true } }), false);
+});
 
 test('groupDocs groups by top-level folder, root docs last as 기타, names keep nested paths', () => {
   const docs = [

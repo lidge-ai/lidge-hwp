@@ -53,6 +53,15 @@ export const groupKeyOf = (id) => {
   return match ? `ext://${match[1]}` : id.includes('/') ? id.slice(0, id.indexOf('/')) : ROOT_GROUP;
 };
 
+export function createGroupFor(groups, selectedKey, currentId) {
+  const selected = selectedKey === null ? null : groups.find((g) => g.key === selectedKey);
+  const active = currentId ? groups.find((g) => g.key === groupKeyOf(currentId)) : null;
+  const group = selected ?? active;
+  if (!group || group.key === '') return { kind: 'default' };
+  return group.kind === 'external' ? { kind: 'external', key: group.key.slice('ext://'.length) }
+    : { kind: 'project', name: group.key };
+}
+
 // 사람이 읽는 문서 이름. 외부 문서는 내부 id(ext://<UUID>/...) 대신 "폴더 이름/상대경로"로 보인다.
 export function displayName(id, externalGroups = []) {
   const match = /^ext:\/\/([0-9a-f-]{36})\/(.+)$/i.exec(id || '');
