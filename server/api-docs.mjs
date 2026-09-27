@@ -24,7 +24,9 @@ async function body(req, maxBytes) {
 export function createDocsApi({ store, tabs }) {
   async function handle(req, res, pathname) {
     if (pathname === '/api/docs' && req.method === 'GET') {
-      send(res, 200, { docs: await store.list(), projects: await store.listProjects() });
+      const roots = await store.roots();
+      send(res, 200, { docs: await store.list(), projects: await store.listProjects(),
+        roots, rootsWarning: roots.warning });
       return true;
     }
     if (pathname === '/api/projects') {
@@ -47,9 +49,9 @@ export function createDocsApi({ store, tabs }) {
         const fileName = decodeURIComponent(req.headers['x-file-name'] || '');
         // 커밋과 실패 복구는 docstore가 문서 잠금을 쥔 채로 부른다. 복구가 확인되지 않으면 RECOVERY_FAILED(격리).
         const imported = await store.importDocument(project, fileName, await body(req, 32 * 1024 * 1024), {
-          commit: (id) => commitFile(store.root, id, `Add ${id}`),
-          indexSnapshot: (id) => indexEntry(store.root, id),
-          indexRestore: (id, before) => restoreIndex(store.root, id, before),
+          commit: (id) => commitFile({ workTree: store.root, gitDir: null, path: id }, id, `Add ${id}`),
+          indexSnapshot: (id) => indexEntry({ workTree: store.root, gitDir: null, path: id }, id),
+          indexRestore: (id, before) => restoreIndex({ workTree: store.root, gitDir: null, path: id }, id, before),
         });
         send(res, 201, imported);
       } catch (cause) { error(res, cause.status || 500, cause.code || 'IMPORT_FAILED'); }

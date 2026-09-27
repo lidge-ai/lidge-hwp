@@ -24,6 +24,10 @@ export async function runAgent({ code, timeoutMs = 30000 },
     { store, tabs, config }) {
   const start = Date.now();
   const exporter = config.exporter ?? exportWithReport;
+  const historyFor = store.historyFor ? id => store.historyFor(id)
+    : async id => ({ workTree: store.root, gitDir: null, path: id });
+  const exportRoots = store.exportRoots ? () => store.exportRoots() : () => [store.root];
+  const exportPath = store.exportPath ? id => store.exportPath(id) : id => id;
   if (typeof code !== 'string' || !code.trim() || Buffer.byteLength(code) > 65536 ||
       !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000)
     return { ok: false, error: 'invalid code or timeoutMs', logs: [], elapsedMs: Date.now() - start, saved: [] };
@@ -161,7 +165,8 @@ export async function runAgent({ code, timeoutMs = 30000 },
         bytes = exported.bytes; origin = 'edited';
       }
       const out = await renderDocument({ kind: name === 'snapshot' ? 'snapshot' : 'pdf', bytes, format: state.source.format,
-        docId: state.id, options: args[1], exportsRoot: config.exportsRoot ?? EXPORTS_ROOT, docsRoot: store.root,
+        docId: exportPath(state.id), options: args[1], exportsRoot: config.exportsRoot ?? EXPORTS_ROOT,
+        docsRoots: exportRoots(),
         rhwpBin: config.rhwpBin ?? RHWP_BIN, deadline });
       return { docId: state.id, origin, ...out };
     }
@@ -206,7 +211,8 @@ export async function runAgent({ code, timeoutMs = 30000 },
     if (!out.ok) {
       if (state?.lease) await tabs.waitAgentSave?.(state.lease);
       const disk = state?.id ? await store.read(state.id).catch(() => null) : null;
-      const commit = state?.id ? await lastCommit(store.root, state.id).catch(() => null) : null;
+      const commit = state?.id ? await historyFor(state.id)
+        .then(history => lastCommit(history, state.id)).catch(() => null) : null;
       return { ...out, logs: out.logs ?? [], elapsedMs: Date.now() - start, saved,
         reconciliation: { diskSha256: disk?.sha256 ?? null, lastCommit: commit }, ...(follow ? { follow } : {}) };
     }
@@ -274,7 +280,8 @@ export async function runAgent({ code, timeoutMs = 30000 },
     // A timed-out reply may follow a successful commit. Reconcile; never replay the batch.
     if (state?.lease) await tabs.waitAgentSave?.(state.lease);
     const disk = state?.id ? await store.read(state.id).catch(() => null) : null;
-    const commit = state?.id ? await lastCommit(store.root, state.id).catch(() => null) : null;
+    const commit = state?.id ? await historyFor(state.id)
+      .then(history => lastCommit(history, state.id)).catch(() => null) : null;
     return { ok: false, error: String(e.message ?? e), logs: [], elapsedMs: Date.now() - start,
       saved, reconciliation: { diskSha256: disk?.sha256 ?? null, lastCommit: commit }, ...(follow ? { follow } : {}) };
   } finally {

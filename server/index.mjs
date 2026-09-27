@@ -2,8 +2,8 @@ import http from 'node:http';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROOT, HOST, PORT, DOCS_ROOT, BUILD_DIR } from '../lib/config.mjs';
-import { createDocStore } from '../lib/docstore.mjs';
+import { ROOT, HOST, PORT, DOCS_ROOT, BUILD_DIR, STATE_DIR } from '../lib/config.mjs';
+import { createLibrary } from '../lib/library.mjs';
 import { ensureRepo } from '../lib/git.mjs';
 import { createTabs } from './tabs.mjs';
 import { createDocsApi } from './api-docs.mjs';
@@ -56,9 +56,9 @@ async function staticFile(res, base, name) {
 }
 
 export async function createServer({ docsRoot = DOCS_ROOT, buildDir = BUILD_DIR,
-    startAgentSocket = startAgentSocketImpl, agentConfig = {} } = {}) {
+    stateDir = STATE_DIR, startAgentSocket = startAgentSocketImpl, agentConfig = {} } = {}) {
   await ensureRepo(docsRoot);
-  const store = createDocStore(docsRoot);
+  const store = await createLibrary({ docsRoot, stateDir });
   const tabs = createTabs();
   const docsApi = createDocsApi({ store, tabs });
   const server = http.createServer((req, res) => {

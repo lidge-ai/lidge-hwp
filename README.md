@@ -38,9 +38,12 @@ npm start
 문서함은 독립된 Git 저장소여야 한다. 저장하면 상태줄에 커밋 ID가 표시된다.
 서버 재시작 전에는 편집을 저장하고, 재시작 후에는 문서를 다시 연다.
 
+기존 문서함 외에 등록한 폴더의 HWP·HWPX도 열 수 있다. 외부 문서 ID는 `ext://<UUID>/<상대경로>`이고, 등록 목록은 `~/.lidge-hwp/roots.json`에 저장된다. 외부 문서의 Git 이력은 원본 폴더가 아닌 `~/.lidge-hwp/history/<UUID>/`에 남는다. 폴더가 이동하거나 사라지면 등록은 유지되고 API에서 `available:false`로 표시된다. 이력 보존 기간은 사용자가 결정해야 한다.
+
 | 설정 | 기본값 / 용도 |
 | --- | --- |
 | `LIDGE_HWP_DOCS` | 사용자 홈의 `.lidge-hwp/docs`, 독립된 문서함 Git 루트 |
+| `LIDGE_HWP_STATE_DIR` | 사용자 홈의 `.lidge-hwp`; 외부 루트 등록(`roots.json`)과 섀도 이력(`history/`) 위치. 테스트에서는 별도 임시 디렉터리로 지정한다. |
 | `LIDGE_HWP_PORT` | `10500` |
 | `LIDGE_HWP_RHWP` | 이 저장소의 `rhwp/` |
 | `LIDGE_HWP_CARGO_TARGET` | 빌드에서 사용할 Cargo target 경로 |
@@ -81,6 +84,8 @@ await hwp.save(h);
 return { edited: true };
 ```
 
+`hwp.docs()`는 기본 문서와 등록한 외부 폴더의 문서를 함께 반환한다. 외부 문서는 `hwp.open('ext://<UUID>/example.hwpx')`처럼 열며, 같은 호출의 저장 결과에도 이 ID가 유지된다.
+
 `await hwp.help()`에서 전체 API와 허용된 저수준 `hwp.api()` 메서드를 확인한다.
 `setCell`, `insertText`, `replaceAll`, `splitParagraph`, `createTable`, `insertRow`,
 `mergeCells`, `getFormat`, `styles` 등을 제공한다. 좌표는 0부터 시작하며 구조를 바꾸면
@@ -112,9 +117,7 @@ return { dir: s.dir, pages: s.pages.length, pdf: p.path };
 ```
 
 `snapshot(h, { pages, png, pdf, maxPx })`에서 `pages`는 0부터 센 쪽 번호 배열이다(생략하면 전체, 한 번에 200쪽까지).
-PNG는 macOS `sips`로 만들고 긴 변 `maxPx`(기본 1600)에 맞춘다. 결과는
-`~/.lidge-hwp/exports/<문서 ID>/<시각>-<해시>/`에 `page-001.pdf`, `page-001.png`, `document.pdf`로 남고,
-응답에는 경로만 담긴다. 같은 호출에서 저장 전에 고친 내용도 그대로 그린다(`origin: 'edited'`).
+PNG는 macOS `sips`로 만들고 긴 변 `maxPx`(기본 1600)에 맞춘다. 결과는 기본 문서의 경우 `~/.lidge-hwp/exports/<문서 ID>/<시각>-<해시>/`, 외부 문서의 경우 `~/.lidge-hwp/exports/external/<UUID>/<상대경로>/<시각>-<해시>/`에 남는다. 출력 위치는 등록된 어느 문서 루트 안에도 둘 수 없다. 응답에는 경로만 담긴다. 같은 호출에서 저장 전에 고친 내용도 그대로 그린다(`origin: 'edited'`).
 쪽마다 0.3초 정도 걸리므로 긴 문서는 `timeoutMs`를 늘린다. 쪽 나눔은 CLI 조판을 따르므로 편집기와 조금 다를 수 있다.
 
 ### Aside

@@ -17,7 +17,7 @@ test('studio service worker is replaced by a self-unregistering script and regis
   await writeFile(join(build, 'studio', 'registerSW.js'), "navigator.serviceWorker.register('/studio/sw.js')");
   await writeFile(join(build, 'studio', 'index.html'), '<!doctype html>');
   await git('git', ['-C', docs, 'init', '-q']);
-  const server = await createServer({ docsRoot: docs, buildDir: build, startAgentSocket: null });
+  const server = await createServer({ docsRoot: docs, stateDir: join(root, 'state'), buildDir: build, startAgentSocket: null });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
   const base = 'http://127.0.0.1:' + server.address().port;
@@ -40,7 +40,8 @@ test('사이드바 토글·구분선 마크업과 접힘 CSS·저장 키가 셸�
   const docs = join(root, 'docs');
   await mkdir(docs);
   await git('git', ['-C', docs, 'init', '-q']);
-  const server = await createServer({ docsRoot: docs, buildDir: join(root, 'build'), startAgentSocket: null });
+  const server = await createServer({ docsRoot: docs, stateDir: join(root, 'state'),
+    buildDir: join(root, 'build'), startAgentSocket: null });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
   const base = 'http://127.0.0.1:' + server.address().port;

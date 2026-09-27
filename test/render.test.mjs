@@ -3,6 +3,8 @@ import { mkdtemp, cp, readFile, readdir, rm, access, realpath } from 'node:fs/pr
 import { tmpdir } from 'node:os'; import { join, basename } from 'node:path';
 import { execFile } from 'node:child_process'; import { promisify } from 'node:util';
 import { createDocStore } from '../lib/docstore.mjs';
+import { createLibrary } from '../lib/library.mjs';
+import { createRootsRegistry } from '../lib/roots.mjs';
 import { createTabs } from '../server/tabs.mjs';
 import { checkSnapshotOptions, stampName, pageFile } from '../lib/render.mjs';
 import { ROOT } from '../lib/config.mjs';
@@ -50,6 +52,39 @@ async function seed(t, files) {
   return { root, exportsRoot, agent, context };
 }
 const clean = async root => assert.equal((await run('git', ['-C', root, 'status', '--porcelain'])).stdout, '');
+
+async function externalRender(t) {
+  const f = await seed(t, { 'empty.hwpx': EMPTY });
+  const extra = await mkdtemp(join(tmpdir(), 'lidge-render-extra-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'lidge-render-state-'));
+  t.after(() => Promise.all([rm(extra, { recursive: true, force: true }), rm(stateDir, { recursive: true, force: true })]));
+  await cp(join(SAMPLES, EMPTY), join(extra, 'empty.hwpx'));
+  const registry = await createRootsRegistry({ docsRoot: f.root, stateDir });
+  const { key } = await registry.register(extra);
+  f.context.store = await createLibrary({ docsRoot: f.root, stateDir });
+  return { ...f, extra, stateDir, key, id: `ext://${key}/empty.hwpx` };
+}
+
+test('external snapshots use isolated export path', async t => {
+  const f = await externalRender(t);
+  const out = await f.agent(`const h=await hwp.open(${JSON.stringify(f.id)}); return await hwp.snapshot(h,{png:false,pages:[0]});`);
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.result.docId, f.id);
+  assert.ok(out.result.dir.startsWith(join(await realpath(f.exportsRoot), 'external', f.key, 'empty.hwpx') + '/'));
+  assert.deepEqual(out.result.pages, [{ page: 0, pdf: 'page-001.pdf' }]);
+  assert.ok(await startsWith(join(out.result.dir, 'page-001.pdf'), PDF));
+  assert.equal((await readdir(f.extra)).includes('.git'), false);
+});
+
+test('exports inside any registered root are refused', async t => {
+  const f = await externalRender(t);
+  f.context.config.exportsRoot = join(f.extra, 'exports');
+  const out = await f.agent(`const h=await hwp.open(${JSON.stringify(f.id)}); return await hwp.exportPdf(h);`);
+  assert.equal(out.ok, false);
+  assert.match(out.error, /EXPORTS_INSIDE_DOCS/);
+  await assert.rejects(access(join(f.extra, 'exports')));
+  assert.equal((await readdir(f.extra)).includes('.git'), false);
+});
 
 test('hwp.snapshot writes per-page PDF and PNG outside the library', async t => {
   const { root, exportsRoot, agent } = await seed(t, { 'long.hwp': 'hwp3-sample16-hwp5.hwp' });

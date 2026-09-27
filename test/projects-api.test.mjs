@@ -15,7 +15,8 @@ async function setup(t) {
   const docs = join(root, 'docs');
   await mkdir(docs);
   await git('git', ['-C', docs, 'init', '-q']);
-  const server = await createServer({ docsRoot: docs, buildDir: join(root, 'build'), startAgentSocket: null });
+  const server = await createServer({ docsRoot: docs, stateDir: join(root, 'state'),
+    buildDir: join(root, 'build'), startAgentSocket: null });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
   return { docs, base: 'http://127.0.0.1:' + server.address().port };
