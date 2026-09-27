@@ -193,14 +193,13 @@ test('external rename only changes shadow Git history', async t => {
 });
 
 test('pre-commit failure restores names and exact index snapshots including staged deletions', async t => {
-  for (const stagedDeletion of ['old', 'new']) {
-    const f = await setup(t, { files: { 'P/a.hwp': HWP,
-      ...(stagedDeletion === 'new' ? { 'P/b.hwp': HWP } : {}), 'P/other.hwp': HWP } });
+  // 대상 이름이 staged deletion인 경우는 HEAD에 남은 이름이라 커밋 전에 409로 거부된다(아래 별도 테스트).
+  for (const stagedDeletion of ['old']) {
+    const f = await setup(t, { files: { 'P/a.hwp': HWP, 'P/other.hwp': HWP } });
     await writeFile(join(f.root, 'P/other.hwp'), Buffer.concat([HWP, Buffer.from('stage')]));
     await git(f.root, 'add', 'P/other.hwp');
     const deletedPath = stagedDeletion === 'old' ? 'P/a.hwp' : 'P/b.hwp';
     await git(f.root, 'rm', '--cached', '--', deletedPath);
-    if (stagedDeletion === 'new') await unlink(join(f.root, deletedPath));
     const oldHistory = { workTree: f.root, path: 'P/a.hwp' };
     const newHistory = { workTree: f.root, path: 'P/b.hwp' };
     const snapshots = [await indexEntry(oldHistory, 'P/a.hwp'), await indexEntry(newHistory, 'P/b.hwp'),
@@ -217,6 +216,32 @@ test('pre-commit failure restores names and exact index snapshots including stag
       await indexEntry({ workTree: f.root, path: 'P/other.hwp' }, 'P/other.hwp')], snapshots);
     assert.equal(f.server.tabs.owns(owner.lease, 'P/a.hwp'), true);
   }
+});
+
+test('destination recorded only in HEAD (deleted from disk and index) is a collision, including case/NFC variants', async t => {
+  const f = await setup(t, { files: { 'P/a.hwp': HWP, 'P/b.hwp': HWP, 'P/other.hwp': HWP } });
+  await git(f.root, 'rm', '-q', '--', 'P/b.hwp'); // 디스크와 index에서 지우고 커밋하지 않은 상태
+  await writeFile(join(f.root, 'P/other.hwp'), Buffer.concat([HWP, Buffer.from('stage')]));
+  await git(f.root, 'add', 'P/other.hwp');
+  const entries = async () => Promise.all(['P/a.hwp', 'P/b.hwp', 'P/other.hwp']
+    .map(path => indexEntry({ workTree: f.root, path }, path)));
+  const beforeHead = await head(f.root);
+  const beforeIndex = await entries();
+  const owner = await claim(f, 'P/a.hwp');
+  for (const name of ['b.hwp', 'B.hwp']) {
+    await expectError(await requestRename(f, 'P/a.hwp', name, owner), 409, 'NAME_COLLISION');
+  }
+  assert.equal(await head(f.root), beforeHead);
+  assert.deepEqual(await entries(), beforeIndex);
+  assert.deepEqual(await readFile(join(f.root, 'P/a.hwp')), HWP);
+  assert.equal((await readdir(join(f.root, 'P'))).includes('b.hwp'), false);
+  assert.equal(f.server.tabs.owns(owner.lease, 'P/a.hwp'), true);
+  // 다른 이름으로는 정상 이동하고, staged deletion과 다른 파일의 staged 변경은 그대로 남는다.
+  assert.equal((await requestRename(f, 'P/a.hwp', 'c.hwp', owner)).status, 200);
+  assert.deepEqual(await changedPaths(f.root), ['P/a.hwp', 'P/c.hwp']);
+  const status = (await git(f.root, 'status', '--porcelain', '--', 'P/b.hwp', 'P/other.hwp')).stdout;
+  assert.match(status, /^D  P\/b\.hwp$/m);
+  assert.match(status, /^M  P\/other\.hwp$/m);
 });
 
 test('post-commit HEAD failure quarantines both ids; PUT, rename, tab claim return 423 before lookup', async t => {
