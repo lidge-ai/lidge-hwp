@@ -1,0 +1,13 @@
+{
+  "source": "rhwp/ (lidge-ai/rhwp base c4c72db8c388ffd30f0d5d0f9cf0dabe6244867e; local patches listed below)",
+  "localPatches": [
+    "sanitize embedded blank-document author and local-path metadata",
+    "rename modified Source Han subset primary names to LIDGE Old Hangul Serif without glyph changes"
+  ],
+  "sourceAssets": {
+    "rhwp/saved/blank2010.hwp": "49f3bd4fc45b9d23b9f4f5024678681b137cac96f659e55e439100723f15ac1f",
+    "rhwp/src/parser/hwpx/blank2010_assets/hwp_summary_information.bin": "1d4a2f1d5df7cae33651a67534db2691c1f790bde064f190dda427c05c158ae0",
+    "rhwp/src/parser/hwpx/blank2010_assets/doc_options_link_doc.bin": "8d23ae1cdff24d61fbaa3e0d1165fb65d352457c7788e9cb928c2a883a0deb7d"
+  },
+  "sha256": "2482f440d7322ed8d6783d690e588e6412a5359efddb2f8a2414e1f1ec13acb5"
+}

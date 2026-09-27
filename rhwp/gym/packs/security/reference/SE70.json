@@ -1,0 +1,18 @@
+{
+  "id": "SE70",
+  "steps": [
+    {
+      "run": [
+        "edit",
+        "redact",
+        "{input}",
+        "--kind",
+        "email",
+        "--no-raw",
+        "-o",
+        "{sub:email-masked.hwpx}",
+        "--json"
+      ]
+    }
+  ]
+}

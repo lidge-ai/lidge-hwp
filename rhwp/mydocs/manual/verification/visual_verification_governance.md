@@ -1,0 +1,88 @@
+---
+kind: canonical
+status: active
+canonical: mydocs/manual/verification/visual_verification_governance.md
+last_verified: 2026-09-17
+---
+
+# PR 시각 검증 거버넌스 (OVL-step)
+
+> 근거: `mydocs/feedback/ovl-step.md` (2026-07-04 작업지시자 피드백).
+> 적용 대상: 일반 PR review, collaborator-mediated review, 여러 PR 체리픽 누적 검토.
+
+## 원칙
+
+1. **선택적 적용 — 기계적 전수 금지.** 시각 검증은 모든 샘플 PR 에 일률 수행하는 절차가
+   아니다. **PR 의 수정 목적과 검증해야 할 사용자-visible 동작**에 맞춰 수행 여부와 도구를
+   선택한다.
+2. **자동 도구는 보조, 판정은 사람.** sweep/OVR/게이트류는 후보 검출·범위 축소·무회귀
+   증명용이다. **최종 시각 판정 권위는 작업지시자(확인한 한컴 편집기·동일 원문 기준 PDF)** 이며
+   어떤 도구 통과도 이를 대체하지 않는다 (자기검증 ≠ 한컴 호환).
+   다만 `scripts/visual_sweep.py`의 review PNG를 `승인` 근거로 제시한 경우에는 2px 이웃 관용 내용 실루엣
+   일치율이 90% 미만인 쪽을 승인할 수 없다. 기여자가 자기 branch에서 원인을 수정하고 새 PNG로 재검토받는
+   것이 먼저이며 reviewer가 메인터너 보정으로 대신하지 않는다. 실제 글꼴이 완전히 다른 사실을 UTF-8 증거로
+   남긴 경우만 도구의 점수 gate 예외가 된다. 예외여도 작업지시자의 직접 판독은 남는다.
+3. **원인과 발동 범위가 이미 정해진 렌더링 PR**은 [visual_sweep_guide.md](visual_sweep_guide.md)를
+   기본 진입점으로 사용한다. 독립 정답지와 실제 사용자-visible 실패에서 결함을 찾고 원인·범위를
+   판정하는 작업은 [버그 헌팅 playbook](../bug_hunting_playbook.md)이 상위 절차이며, visual sweep은
+   그 안의 후보 검출·수정 전후 무회귀 도구다.
+
+## bug-hunter와 visual sweep 라우팅
+
+두 절차는 전역 우선순위를 다투지 않는다. 시작 목적에 따라 지배 절차를 고른다.
+
+| 시작 조건 | 지배 절차 | visual sweep의 역할 |
+| --- | --- | --- |
+| 기준 PDF와 rhwp가 다르다는 실제 사용자-visible 결함, 원인·수정 범위 미확정 | [bug-hunter](../bug_hunting_playbook.md) | page ranking·overlay·render tree로 재현 범위를 좁히고 수정 전후 무회귀를 남김 |
+| 원인과 발동 page가 확정된 renderer/layout PR | 이 거버넌스 | 발동 페이지의 compare/OVL와 회귀 증적 생성 |
+| 도구·문서·CI 전용 변경 | 변경 범위별 직접 검증 | 보통 실행하지 않음 |
+
+따라서 sweep의 `flagged`, pixel/ink 지표는 발견의 입력일 뿐 원인 판정이나 수용 결론이 아니다.
+glyph 겹침 같은 반복 차이도 bug-hunter의 정답지 provenance, source→IR→layout→paint 원인 경로와
+사람 판정을 거쳐야 코드 수정 대상으로 승격한다.
+
+## 도구 매핑 — 무엇을 확인할 때 무엇을 쓰나
+
+| 확인 대상 | 도구 | 산출물 |
+|---|---|---|
+| 페이지 수·overlay 차이 위치·잉크 일치율·drift/overflow/겹침 **후보 자동 검출** | `scripts/visual_sweep.py` ([가이드](visual_sweep_guide.md)) | 페이지별 후보 목록, raster overlay |
+| **개체(표·그림) geometry 무회귀** (baseline 대비 이동/리사이즈) | `tools/object_visual_regression.py --no-hwp` ([매뉴얼](object_visual_regression.md)) — Linux 가능, 한컴 불필요 | `objects.tsv`, 회귀 건수(종료코드) |
+| 개체 단위 rhwp↔한글 대조 (한컴 환경) | 동일 도구 full 모드 | `gallery.html` side-by-side 크롭 |
+| 라운드트립 시각 기하 회귀 | `rhwp render-diff` | PASS/OVER/STRUCT 판정 |
+| HWPX→HWP 변환 페이지네이션 정합 | `tools/roundtrip_fidelity_harness.py` | SAME/PI_MOVED/PAGE_DELTA |
+| 직렬화 구조 보존 | `hwpx-roundtrip`/`hwp5-roundtrip` + baseline 테스트 | 하드실패 종료코드 |
+| **최종 시각 판정 자료** | before/after(+정답지) 3-way + **OVL 정합 패널** | `mydocs/pr/assets/` PNG |
+
+## PR 유형별 적용 (선택 기준 예시)
+
+| PR 유형 | 시각 검증 |
+|---|---|
+| 렌더링 코어(layout/typeset/renderer) 수정 | **필수** — OVR 무회귀 + 발동 샘플 before/after/OVL + 작업지시자 판정 |
+| 직렬화(serializer) 수정 | roundtrip 게이트 + (시각 영향 시) render-diff. 판정은 페이지·기하 변화 있을 때만 |
+| 도구/문서/CI 전용 (src 무변경) | 시각 검증 불필요 — 도구 자체 스모크로 대체 |
+| studio/확장 UI (렌더 엔진 무관) | 시각 판정 불필요 — 기능 스모크·e2e 로 대체 |
+| golden SVG/baseline 갱신 포함 | 갱신 사유가 fix 별로 분리·설명돼야 하며 해당 페이지 판정 필수 |
+
+## OVL(overlay) 정합 패널 규약
+
+정답지(한컴 PDF 렌더)와 판정본(rhwp 렌더)을 같은 크기로 겹친 합성 이미지:
+
+- **채널 규약**: R=오라클 gray, G=B=rhwp gray → **검정=일치 잉크, 빨강=rhwp 만,
+  청록=오라클만, 흰색=배경**.
+- 판정 대상 geometry(표 구조·행 높이·배치)가 프린지 없이 검정으로 겹치는지를 본다.
+- 글자 주변 미세 프린지는 폰트 메트릭 차이(오픈소스 폴백 vs 한컴 폰트)로 인한 일반 현상 —
+  캡션에 명시해 오해를 방지한다.
+
+## 산출물·게시 관례
+
+- 판정 PNG 는 `mydocs/pr/assets/pr{번호}_{주제}_review_p{페이지}[_3way|_ovl].png` 로 커밋.
+- PR 코멘트에는 **커밋 SHA 고정 raw URL** 로 임베드(브랜치 URL 금지 — devel 진전 시 깨짐).
+- 렌더링 PR 머지 코멘트 표준 구성: 정량 요약(테스트/게이트) + OVR 무회귀 표 +
+  before/after/OVL 시각 자료 + 판정 결과.
+
+## 관련 문서
+
+- [visual_sweep_guide.md](visual_sweep_guide.md) — sweep 도구 사용법(진입점)
+- [object_visual_regression.md](object_visual_regression.md) — OVR 하니스
+- [roundtrip_fidelity_harness.md](roundtrip_fidelity_harness.md) — 변환 페이지네이션 정합
+- `mydocs/feedback/ovl-step.md` — 본 거버넌스의 원 피드백

@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "rhwp": { "command": "./bin/rhwp", "args": ["mcp-serve"] }
+  }
+}

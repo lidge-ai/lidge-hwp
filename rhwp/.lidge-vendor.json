@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/lidge-ai/rhwp",
+  "upstream": "https://github.com/edwardkim/rhwp",
+  "ref": "lidge/studio-host-devel",
+  "commit": "c4c72db8c388ffd30f0d5d0f9cf0dabe6244867e",
+  "upstreamDevelBase": "eb9142dd7c73297d555383d7d8434a470bdef26e",
+  "localPatches": ["sanitize embedded blank-document author and local-path metadata", "rename modified Source Han subset primary names to LIDGE Old Hangul Serif without glyph changes"],
+  "excluded": ["mydocs (manual 제외)", "mydocs/manual/memory", "mydocs/manual/codex", "pdf", "samples (빌드 참조 표본 제외)", "samples/hwpx/aift.hwpx", "tests/fixtures (fonts 제외)", "tests/golden_svg", "fuzz/corpus", "saved (blank2010.hwp 제외)", "rhwp-studio/public/samples", "tools/task2279/evidence", "scripts/survey_korea_downloads_font_jsdelivr.mjs", "tools/llm_verifier/*/corpus", "tools/llm_verifier/*/fixtures"]
+}

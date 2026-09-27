@@ -1,0 +1,28 @@
+# 앱 쪽 규칙은 저장소 루트 기준이다. rhwp/ 안(포크 스냅샷)은 rhwp/.gitignore가 맡는다.
+/out/
+/*.pdf
+/*.png
+/templates/**/*.pdf
+/templates/**/*.png
+/devlog/**/*.pdf
+/devlog/**/*.png
+.DS_Store
+node_modules/
+/build/
+/.codexclaw/
+/vendor/
+/docs-library/
+/devlog/
+.env
+.env.*
+!.env.example
+/rhwp/mydocs/manual/memory/
+/rhwp/mydocs/manual/codex/
+/rhwp/samples/hwpx/aift.hwpx
+/rhwp/fuzz/corpus/
+/rhwp/rhwp-studio/public/samples/
+/rhwp/tools/task2279/evidence/
+/rhwp/scripts/survey_korea_downloads_font_jsdelivr.mjs
+# 스냅샷된 포크의 빌드 산출물 (target·pkg·*.wasm·dist는 rhwp/.gitignore도 뺀다)
+rhwp/target/
+rhwp/pkg/

@@ -1,0 +1,32 @@
+name: App checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '26'
+          cache: npm
+      - run: npm ci
+      - name: Public unit and contract tests
+        # Private document integration fixtures are intentionally not distributed.
+        # The test runner reports those as skipped; this job is not the full integration gate.
+        run: npm test
+      - name: Embedded metadata privacy
+        run: node scripts/sanitize-rhwp-metadata.mjs --root rhwp --check
+      - name: Shell syntax
+        run: sh -n scripts/build-studio.sh scripts/build-rhwp-cli.sh scripts/rhwp-vendor.sh

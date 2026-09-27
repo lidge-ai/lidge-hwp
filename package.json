@@ -1,0 +1,16 @@
+{
+  "name": "lidge-hwp",
+  "version": "0.1.0",
+  "description": "Local HWP/HWPX editor with verified MCP agent editing",
+  "license": "MIT",
+  "engines": { "node": ">=26" },
+  "repository": { "type": "git", "url": "https://github.com/lidge-ai/lidge-hwp.git" },
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.mjs",
+    "test": "node --test test/*.test.mjs",
+    "build:studio": "sh scripts/build-studio.sh"
+  },
+  "dependencies": { "kordoc": "4.15.4" }
+}

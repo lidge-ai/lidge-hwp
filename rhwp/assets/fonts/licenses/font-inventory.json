@@ -1,0 +1,1551 @@
+{
+  "schemaVersion": 1,
+  "observedDate": "2026-09-27",
+  "scope": "Current WOFF2 name-table and license evidence, including verified LIDGE Old Hangul Serif renaming and retained pre-renaming evidence; not a blanket redistribution approval",
+  "metadataMethod": "Initial Node.js Brotli/OpenType name-table extraction; renamed WOFF2/OTF name IDs 0,1,3,4,5,6,13,14 re-read with fontTools 4.62.1. Read-only rename-sourcehan-subset.py --check verifies preserved non-name data.",
+  "fontCount": 36,
+  "fontBytes": 22651568,
+  "fonts": [
+    {
+      "file": "Cafe24Ssurround-v2.0.woff2",
+      "bytes": 391868,
+      "sha256": "2d726dbf8863d66e6d5cf56e2532c5d14d8a4b514461b565c513c1da6ae2f41a",
+      "names": {
+        "0": [
+          "Copyright © Cafe24 Corp. All Rights Reserved."
+        ],
+        "1": [
+          "Cafe24 Ssurround Bold"
+        ],
+        "4": [
+          "카페24 써라운드"
+        ],
+        "5": [
+          "Version 1.001"
+        ],
+        "6": [
+          "Cafe24Ssurround"
+        ],
+        "14": [
+          "https://fonts.cafe24.com"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "License-Ssurround.pdf",
+        "OFL-1.1.txt"
+      ],
+      "projectSourceUrl": "https://fonts.cafe24.com/",
+      "licenseSourceUrls": [
+        "https://img.cafe24.com/csdstatic/freefonts/download/kr/Cafe24Ssurround-v2.0.zip",
+        "https://openfontlicense.org/documents/OFL.txt"
+      ],
+      "originalArchiveMatch": {
+        "file": "Cafe24Ssurround-v2.0.woff2",
+        "archive": "https://img.cafe24.com/csdstatic/freefonts/download/kr/Cafe24Ssurround-v2.0.zip",
+        "archiveSha256": "a5f9c0c8f4cc2d3c00220ace363a893618c5cf59ff5aea184aeced3bd3e9af5c",
+        "member": "Cafe24Ssurround-v2.0/webfont/Cafe24Ssurround-v2.0.woff2",
+        "sha256": "2d726dbf8863d66e6d5cf56e2532c5d14d8a4b514461b565c513c1da6ae2f41a"
+      },
+      "status": "official-archive-byte-match"
+    },
+    {
+      "file": "Cafe24Supermagic-Regular-v1.0.woff2",
+      "bytes": 765684,
+      "sha256": "65434a217b9532867a1fe41417d0ad51210a60027a51dca40748aafed48ef0ba",
+      "names": {
+        "0": [
+          "Copyright ⓒ Cafe24 Corp. All Rights Reserved."
+        ],
+        "1": [
+          "Cafe24 Supermagic"
+        ],
+        "4": [
+          "카페24 슈퍼매직 Regular"
+        ],
+        "5": [
+          "Version 1.000"
+        ],
+        "6": [
+          "Cafe24Supermagic-Regular"
+        ],
+        "14": [
+          "https://fonts.cafe24.com"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "License-Supermagic.pdf",
+        "OFL-1.1.txt"
+      ],
+      "projectSourceUrl": "https://fonts.cafe24.com/",
+      "licenseSourceUrls": [
+        "https://img.cafe24.com/csdstatic/freefonts/download/kr/Cafe24Supermagic-Regular-v1.0.zip",
+        "https://openfontlicense.org/documents/OFL.txt"
+      ],
+      "originalArchiveMatch": {
+        "file": "Cafe24Supermagic-Regular-v1.0.woff2",
+        "archive": "https://img.cafe24.com/csdstatic/freefonts/download/kr/Cafe24Supermagic-Regular-v1.0.zip",
+        "archiveSha256": "f646af53800f40355f45f708605c1980b07563118d8b098d9a699f3aa53cf15b",
+        "member": "Cafe24Supermagic-Regular-v1.0/webfont/Cafe24Supermagic-Regular-v1.0.woff2",
+        "sha256": "65434a217b9532867a1fe41417d0ad51210a60027a51dca40748aafed48ef0ba"
+      },
+      "status": "official-archive-byte-match"
+    },
+    {
+      "file": "D2Coding-Bold.woff2",
+      "bytes": 1579172,
+      "sha256": "41273810f9aed2775c6f1b9eb7e4f12997da644002872b20a31d3d3144e0cc0a",
+      "names": {
+        "0": [
+          "Copyright (c) 2015-2016 NHN Corporation. All rights reserved. Font designed by FONTRIX Inc."
+        ],
+        "1": [
+          "D2Coding"
+        ],
+        "4": [
+          "D2Coding Bold"
+        ],
+        "5": [
+          "Version 1.3.2; Build 20180524"
+        ],
+        "6": [
+          "D2CodingBold"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1."
+        ],
+        "14": [
+          "http://dev.naver.com/wiki/nanumfont/index.php/OpenFontLicense"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "D2Coding-OFL.txt"
+      ],
+      "projectSourceUrl": "https://github.com/naver/d2-coding-font",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/naver/d2-coding-font/master/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "D2Coding-Regular.woff2",
+      "bytes": 1485508,
+      "sha256": "358df12fdf9b65d0fd31554a826f97af4eeefd96a047297a28a856315fe872c1",
+      "names": {
+        "0": [
+          "Copyright (c) 2015-2016 NHN Corporation. All rights reserved. Font designed by FONTRIX Inc."
+        ],
+        "1": [
+          "D2Coding"
+        ],
+        "4": [
+          "D2Coding"
+        ],
+        "5": [
+          "Version 1.3.2; Build 20180524"
+        ],
+        "6": [
+          "D2Coding"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1."
+        ],
+        "14": [
+          "http://dev.naver.com/wiki/nanumfont/index.php/OpenFontLicense"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "D2Coding-OFL.txt"
+      ],
+      "projectSourceUrl": "https://github.com/naver/d2-coding-font",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/naver/d2-coding-font/master/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "GowunBatang-Bold.woff2",
+      "bytes": 447856,
+      "sha256": "aef1b91ea9ea4688fb296044959b38dfeeaa3e1650af5d543a2b5c160fa30b36",
+      "names": {
+        "0": [
+          "Copyright 2021 The Gowun Batang Project Authors (https://github.com/yangheeryu/Gowun-Batang)"
+        ],
+        "1": [
+          "Gowun Batang"
+        ],
+        "4": [
+          "Gowun Batang Bold"
+        ],
+        "5": [
+          "Version 2.000"
+        ],
+        "6": [
+          "GowunBatang-Bold"
+        ],
+        "14": [
+          "https://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "GowunBatang-OFL.txt"
+      ],
+      "projectSourceUrl": "https://github.com/yangheeryu/Gowun-Batang",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/gowunbatang/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "GowunBatang-Regular.woff2",
+      "bytes": 495092,
+      "sha256": "0c6a288aa0c12081dccde769c312f71f290b353243747dd24fb8c57f94f01d72",
+      "names": {
+        "0": [
+          "Copyright 2021 The Gowun Batang Project Authors (https://github.com/yangheeryu/Gowun-Batang)"
+        ],
+        "1": [
+          "Gowun Batang"
+        ],
+        "4": [
+          "Gowun Batang Regular"
+        ],
+        "5": [
+          "Version 2.000"
+        ],
+        "6": [
+          "GowunBatang-Regular"
+        ],
+        "14": [
+          "https://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "GowunBatang-OFL.txt"
+      ],
+      "projectSourceUrl": "https://github.com/yangheeryu/Gowun-Batang",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/gowunbatang/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "GowunDodum-Regular.woff2",
+      "bytes": 406476,
+      "sha256": "349c098a6181952dab564bf891b8efcacfbf855adc28d40b4aa2e5937c101c56",
+      "names": {
+        "0": [
+          "Copyright 2021 The Gowun Dodum Project Authors (https://github.com/yangheeryu/Gowun-Dodum)"
+        ],
+        "1": [
+          "Gowun Dodum"
+        ],
+        "4": [
+          "Gowun Dodum Regular"
+        ],
+        "5": [
+          "Version 2.000"
+        ],
+        "6": [
+          "GowunDodum-Regular"
+        ],
+        "14": [
+          "https://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "GowunDodum-OFL.txt"
+      ],
+      "projectSourceUrl": "https://github.com/yangheeryu/Gowun-Dodum",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/gowundodum/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "Happiness-Sans-Bold.woff2",
+      "bytes": 336604,
+      "sha256": "54becdfd4f7f58e872eba8fbc67778e29cff94c1cd03f9a0ebadfbe482b4aba0",
+      "names": {
+        "0": [
+          "Copyright © 2022 by THE HYUNDAI. All right reserved."
+        ],
+        "1": [
+          "Happiness Sans Bold"
+        ],
+        "4": [
+          "Happiness Sans Bold"
+        ],
+        "5": [
+          "Version 1.000; Build 20220220"
+        ],
+        "6": [
+          "Happiness-Sans-Bold"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "HapinessSans_License.pdf"
+      ],
+      "projectSourceUrl": "https://thehyundaifont.com/",
+      "licenseSourceUrls": [
+        "https://thehyundaifont.com/assets/fonts/HappinessSans-Screen.zip"
+      ],
+      "originalArchiveMatch": {
+        "file": "Happiness-Sans-Bold.woff2",
+        "archive": "https://thehyundaifont.com/assets/fonts/HappinessSans-Screen.zip",
+        "archiveSha256": "1defb001694a8bd3fd5c7a15c45377e82e654569177c6995016ae321223fb041",
+        "member": "screen/webfont/Happiness-Sans-Bold.woff2",
+        "sha256": "54becdfd4f7f58e872eba8fbc67778e29cff94c1cd03f9a0ebadfbe482b4aba0"
+      },
+      "status": "official-archive-byte-match"
+    },
+    {
+      "file": "Happiness-Sans-Regular.woff2",
+      "bytes": 291556,
+      "sha256": "4fc37e7663c3d440b5a6af6938bde0c6618b666553ed521745f3362050bd4988",
+      "names": {
+        "0": [
+          "Copyright © 2022 by THE HYUNDAI. All right reserved."
+        ],
+        "1": [
+          "Happiness Sans Regular"
+        ],
+        "4": [
+          "Happiness Sans Regular"
+        ],
+        "5": [
+          "Version 1.000; Build 20220220"
+        ],
+        "6": [
+          "Happiness-Sans-Regular"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "HapinessSans_License.pdf"
+      ],
+      "projectSourceUrl": "https://thehyundaifont.com/",
+      "licenseSourceUrls": [
+        "https://thehyundaifont.com/assets/fonts/HappinessSans-Screen.zip"
+      ],
+      "originalArchiveMatch": {
+        "file": "Happiness-Sans-Regular.woff2",
+        "archive": "https://thehyundaifont.com/assets/fonts/HappinessSans-Screen.zip",
+        "archiveSha256": "1defb001694a8bd3fd5c7a15c45377e82e654569177c6995016ae321223fb041",
+        "member": "screen/webfont/Happiness-Sans-Regular.woff2",
+        "sha256": "4fc37e7663c3d440b5a6af6938bde0c6618b666553ed521745f3362050bd4988"
+      },
+      "status": "official-archive-byte-match"
+    },
+    {
+      "file": "Happiness-Sans-Title.woff2",
+      "bytes": 348700,
+      "sha256": "057e6821a062d9192964d99cf058fe6608230e9e4a464c9652b3756e02460e22",
+      "names": {
+        "0": [
+          "Copyright © 2022 by THE HYUNDAI. All right reserved."
+        ],
+        "1": [
+          "Happiness Sans Title"
+        ],
+        "4": [
+          "Happiness Sans Title"
+        ],
+        "5": [
+          "Version 1.000; Build 20220220"
+        ],
+        "6": [
+          "Happiness-Sans-Title"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "HapinessSans_License.pdf"
+      ],
+      "projectSourceUrl": "https://thehyundaifont.com/",
+      "licenseSourceUrls": [
+        "https://thehyundaifont.com/assets/fonts/HappinessSans-Screen.zip"
+      ],
+      "originalArchiveMatch": {
+        "file": "Happiness-Sans-Title.woff2",
+        "archive": "https://thehyundaifont.com/assets/fonts/HappinessSans-Screen.zip",
+        "archiveSha256": "1defb001694a8bd3fd5c7a15c45377e82e654569177c6995016ae321223fb041",
+        "member": "screen/webfont/Happiness-Sans-Title.woff2",
+        "sha256": "057e6821a062d9192964d99cf058fe6608230e9e4a464c9652b3756e02460e22"
+      },
+      "status": "official-archive-byte-match"
+    },
+    {
+      "file": "HappinessSansVF.woff2",
+      "bytes": 613412,
+      "sha256": "cd29de60acf8c466938400561fcbfb14812dd5981f4f78b0c8da74609682423c",
+      "names": {
+        "0": [
+          "Copyright © 2022 by THE HYUNDAI. All right reserved."
+        ],
+        "1": [
+          "Happiness Sans VF"
+        ],
+        "4": [
+          "Happiness Sans VF"
+        ],
+        "5": [
+          "Version 1.000; Build 20220220"
+        ],
+        "6": [
+          "HappinessSansVF"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "HapinessSans_License.pdf"
+      ],
+      "projectSourceUrl": "https://thehyundaifont.com/",
+      "licenseSourceUrls": [
+        "https://thehyundaifont.com/assets/fonts/HappinessSans-Screen.zip"
+      ],
+      "originalArchiveMatch": {
+        "file": "HappinessSansVF.woff2",
+        "archive": "https://thehyundaifont.com/assets/fonts/HappinessSans-Screen.zip",
+        "archiveSha256": "1defb001694a8bd3fd5c7a15c45377e82e654569177c6995016ae321223fb041",
+        "member": "screen/webfont/HappinessSansVF.woff2",
+        "sha256": "cd29de60acf8c466938400561fcbfb14812dd5981f4f78b0c8da74609682423c"
+      },
+      "status": "official-archive-byte-match"
+    },
+    {
+      "file": "LatinModernMath-Regular.woff2",
+      "bytes": 391760,
+      "sha256": "1177d9025d1e797c54b3c7676976365abd90f903423091de7f0f4e7a4b372162",
+      "names": {
+        "0": [
+          "Copyright 2012--2014 for Latin Modern Math OTF by B. Jackowski, P. Strzelczyk and P. Pianowski (on behalf of TeX users groups). This work is released under the GUST Font License -- see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details."
+        ],
+        "1": [
+          "Latin Modern Math"
+        ],
+        "4": [
+          "LatinModernMath-Regular"
+        ],
+        "5": [
+          "Version 1.959"
+        ],
+        "6": [
+          "LatinModernMath-Regular"
+        ]
+      },
+      "license": "GUST Font License (LPPL-1.3c-or-later)",
+      "licenseFiles": [
+        "GUST-FONT-LICENSE.txt",
+        "LPPL-1.3c.txt",
+        "README-Latin-Modern-Math.txt",
+        "MANIFEST-Latin-Modern-Math.txt"
+      ],
+      "projectSourceUrl": "https://ctan.org/tex-archive/fonts/lm-math",
+      "licenseSourceUrls": [
+        "https://mirrors.ibiblio.org/CTAN/fonts/lm-math/doc/GUST-FONT-LICENSE.txt",
+        "https://www.latex-project.org/lppl/lppl-1-3c.txt",
+        "https://mirrors.ibiblio.org/CTAN/fonts/lm-math/doc/README-Latin-Modern-Math.txt",
+        "https://mirrors.ibiblio.org/CTAN/fonts/lm-math/doc/MANIFEST-Latin-Modern-Math.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "NanumGothic-Bold.woff2",
+      "bytes": 417252,
+      "sha256": "0bd36842cc218a7b0e1c0f5ec796d90152a02e4cd487b2d868f1130708fe551a",
+      "names": {
+        "0": [
+          "Copyright © 2011 NHN Corporation. All rights reserved. Font designed by Sandoll Communications Inc."
+        ],
+        "1": [
+          "NanumGothic"
+        ],
+        "4": [
+          "NanumGothicBold"
+        ],
+        "5": [
+          "Version 3.020;PS 1;hotconv 1.0.57;makeotf.lib2.0.21895"
+        ],
+        "6": [
+          "NanumGothicBold"
+        ],
+        "14": [
+          "http://www.nhncorp.com"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "NanumGothic-OFL.txt"
+      ],
+      "projectSourceUrl": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/OFL.txt",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "NanumGothic-ExtraBold.woff2",
+      "bytes": 376972,
+      "sha256": "cffea22fa5791731b3de9f9c48b58f4c9eff52581f29377d364a751e63b81ca3",
+      "names": {
+        "0": [
+          "Copyright © 2011 NHN Corporation. All rights reserved. Font designed by Sandoll Communications Inc."
+        ],
+        "1": [
+          "NanumGothicExtraBold"
+        ],
+        "4": [
+          "NanumGothicExtraBold"
+        ],
+        "5": [
+          "Version 3.020;PS 1;hotconv 1.0.57;makeotf.lib2.0.21895"
+        ],
+        "6": [
+          "NanumGothicExtraBold"
+        ],
+        "14": [
+          "http://www.nhncorp.com"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "NanumGothic-OFL.txt"
+      ],
+      "projectSourceUrl": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/OFL.txt",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "NanumGothic-Regular.woff2",
+      "bytes": 340688,
+      "sha256": "4a000e3bca1298c43c70dc97447e537a27e0a8c1585f410be57dfeff06d3f713",
+      "names": {
+        "0": [
+          "Copyright © 2011 NHN Corporation. All rights reserved. Font designed by Sandoll Communications Inc."
+        ],
+        "1": [
+          "NanumGothic"
+        ],
+        "4": [
+          "NanumGothic"
+        ],
+        "5": [
+          "Version 3.020;PS 1;hotconv 1.0.57;makeotf.lib2.0.21895"
+        ],
+        "6": [
+          "NanumGothic"
+        ],
+        "14": [
+          "http://www.nhncorp.com"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "NanumGothic-OFL.txt"
+      ],
+      "projectSourceUrl": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/OFL.txt",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "NanumGothicCoding-Bold.woff2",
+      "bytes": 534060,
+      "sha256": "2fe66da1c9c3f8beca2c618a139e7edabd36a26dd810a324ced06f8b214b2ccd",
+      "names": {
+        "0": [
+          "Copyright © 2009 NHN Corporation. All rights reserved. Font designed by Sandoll Communications Inc."
+        ],
+        "1": [
+          "NanumGothicCoding"
+        ],
+        "4": [
+          "NanumGothicCoding-Bold"
+        ],
+        "5": [
+          "Version 2.000;PS 1;hotconv 1.0.49;makeotf.lib2.0.14853"
+        ],
+        "6": [
+          "NanumGothicCoding-Bold"
+        ],
+        "14": [
+          "http://dev.naver.com/wiki/nanumfont/index.php/OpenFontLicense"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "NanumGothicCoding-OFL.txt"
+      ],
+      "projectSourceUrl": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothiccoding/OFL.txt",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothiccoding/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "NanumGothicCoding-Regular.woff2",
+      "bytes": 521332,
+      "sha256": "87ab32ebaf4e1f803099ad1d096744092c8f985b2e08a24e2304f5ac05d81d6a",
+      "names": {
+        "0": [
+          "Copyright © 2009 NHN Corporation. All rights reserved. Font designed by Sandoll Communications Inc."
+        ],
+        "1": [
+          "NanumGothicCoding"
+        ],
+        "4": [
+          "NanumGothicCoding"
+        ],
+        "5": [
+          "Version 2.000;PS 1;hotconv 1.0.49;makeotf.lib2.0.14853"
+        ],
+        "6": [
+          "NanumGothicCoding"
+        ],
+        "14": [
+          "http://dev.naver.com/wiki/nanumfont/index.php/OpenFontLicense"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "NanumGothicCoding-OFL.txt"
+      ],
+      "projectSourceUrl": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothiccoding/OFL.txt",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothiccoding/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "NanumMyeongjo-Bold.woff2",
+      "bytes": 575580,
+      "sha256": "f2c95c35d72782f71cb60e3cc537c461ae3f5ee7e7504db9653ba7a7024dd548",
+      "names": {
+        "0": [
+          "Copyright © 2010 NHN Corporation. All rights reserved. Font designed by FONTRIX."
+        ],
+        "1": [
+          "NanumMyeongjo"
+        ],
+        "4": [
+          "NanumMyeongjoBold"
+        ],
+        "5": [
+          "Version 2.032;PS 1;hotconv 1.0.56;makeotf.lib2.0.21325"
+        ],
+        "6": [
+          "NanumMyeongjoBold"
+        ],
+        "14": [
+          "http://www.nhncorp.com"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "NanumMyeongjo-OFL.txt"
+      ],
+      "projectSourceUrl": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanummyeongjo/OFL.txt",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/nanummyeongjo/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "NanumMyeongjo-ExtraBold.woff2",
+      "bytes": 694516,
+      "sha256": "b3d23b3f93f4bdad6c9b7f69b11156f90f1576b8383f6117448ee79e27609e56",
+      "names": {
+        "0": [
+          "Copyright © 2010 NHN Corporation. All rights reserved. Font designed by FONTRIX."
+        ],
+        "1": [
+          "NanumMyeongjoExtraBold"
+        ],
+        "4": [
+          "NanumMyeongjoExtraBold"
+        ],
+        "5": [
+          "Version 2.032;PS 1;hotconv 1.0.56;makeotf.lib2.0.21325"
+        ],
+        "6": [
+          "NanumMyeongjoExtraBold"
+        ],
+        "14": [
+          "http://www.nhncorp.com"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "NanumMyeongjo-OFL.txt"
+      ],
+      "projectSourceUrl": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanummyeongjo/OFL.txt",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/nanummyeongjo/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "NanumMyeongjo-Regular.woff2",
+      "bytes": 502068,
+      "sha256": "561e9193a6e848b3f7ce9f8f5907310a13e175bc9d69e77da2842a7517a97c16",
+      "names": {
+        "0": [
+          "Copyright © 2010 NHN Corporation. All rights reserved. Font designed by FONTRIX."
+        ],
+        "1": [
+          "NanumMyeongjo"
+        ],
+        "4": [
+          "NanumMyeongjo"
+        ],
+        "5": [
+          "Version 2.032;PS 1;hotconv 1.0.56;makeotf.lib2.0.21325"
+        ],
+        "6": [
+          "NanumMyeongjo"
+        ],
+        "14": [
+          "http://www.nhncorp.com"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "NanumMyeongjo-OFL.txt"
+      ],
+      "projectSourceUrl": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanummyeongjo/OFL.txt",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/nanummyeongjo/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "NotoSansKR-Bold.woff2",
+      "bytes": 559192,
+      "sha256": "dab3d492daa687386292cff1499225db580f931f800ee0d124eb0636378c6020",
+      "names": {
+        "0": [
+          "(c) 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'."
+        ],
+        "1": [
+          "Noto Sans KR Thin"
+        ],
+        "4": [
+          "Noto Sans KR Thin Bold"
+        ],
+        "5": [
+          "Version 2.004-H2;hotconv 1.0.118;makeotfexe 2.5.65603"
+        ],
+        "6": [
+          "NotoSansKRThin-Bold"
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "NotoSansKR-OFL.txt"
+      ],
+      "projectSourceUrl": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/OFL.txt",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "NotoSansKR-ExtraLight.woff2",
+      "bytes": 592496,
+      "sha256": "3b5cac6af73fd94fa91ded10f6cfc54c7ce52189986fe7ca6fd457208f1d3673",
+      "names": {
+        "0": [
+          "(c) 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'."
+        ],
+        "1": [
+          "Noto Sans KR ExtraLight"
+        ],
+        "4": [
+          "Noto Sans KR ExtraLight"
+        ],
+        "5": [
+          "Version 2.004-H2;hotconv 1.0.118;makeotfexe 2.5.65603"
+        ],
+        "6": [
+          "NotoSansKRExtraLight"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://scripts.sil.org/OFL"
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "NotoSansKR-OFL.txt"
+      ],
+      "projectSourceUrl": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/OFL.txt",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "NotoSansKR-Regular.woff2",
+      "bytes": 562220,
+      "sha256": "d1bf8649914a4fe9477a8735bf056383e44e466141fb3d61897252e06d900c1a",
+      "names": {
+        "0": [
+          "(c) 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'."
+        ],
+        "1": [
+          "Noto Sans KR"
+        ],
+        "4": [
+          "Noto Sans KR Regular"
+        ],
+        "5": [
+          "Version 2.004-H2;hotconv 1.0.118;makeotfexe 2.5.65603"
+        ],
+        "6": [
+          "NotoSansKR-Regular"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "NotoSansKR-OFL.txt"
+      ],
+      "projectSourceUrl": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/OFL.txt",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/OFL.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "NotoSerifKR-Bold.woff2",
+      "bytes": 1033556,
+      "sha256": "504d6af6abb882acd912d47bafa383c4512a6c8c33635e4e8fb37111d9310941",
+      "names": {
+        "0": [
+          "(c) 2017-2024 Adobe (http://www.adobe.com/)."
+        ],
+        "1": [
+          "Noto Serif KR ExtraLight"
+        ],
+        "4": [
+          "Noto Serif KR ExtraLight Bold"
+        ],
+        "5": [
+          "Version 2.003-H1;hotconv 1.1.1;makeotfexe 2.6.0"
+        ],
+        "6": [
+          "NotoSerifKRExtraLight-Bold"
+        ],
+        "14": [
+          "https://openfontlicense.org"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "NotoSerifKR-LICENSE.txt"
+      ],
+      "projectSourceUrl": "https://github.com/notofonts/noto-cjk",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Serif/LICENSE"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "NotoSerifKR-Regular.woff2",
+      "bytes": 971428,
+      "sha256": "c9a1e3ac69994d680883b53b1fd83d520733b704792522a932bfaa276117de45",
+      "names": {
+        "0": [
+          "(c) 2017-2024 Adobe (http://www.adobe.com/)."
+        ],
+        "1": [
+          "Noto Serif KR ExtraLight"
+        ],
+        "4": [
+          "Noto Serif KR ExtraLight Regular"
+        ],
+        "5": [
+          "Version 2.003-H1;hotconv 1.1.1;makeotfexe 2.6.0"
+        ],
+        "6": [
+          "NotoSerifKRExtraLight-Regular"
+        ],
+        "14": [
+          "https://openfontlicense.org"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "NotoSerifKR-LICENSE.txt"
+      ],
+      "projectSourceUrl": "https://github.com/notofonts/noto-cjk",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Serif/LICENSE"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "Pretendard-Black.woff2",
+      "bytes": 800404,
+      "sha256": "c5fd0c3568fc1368a3edc0d0fbb36df029935954276e3573451b3bae09e27296",
+      "names": {
+        "0": [
+          "Copyright © 2023 Kil Hyung-jin"
+        ],
+        "1": [
+          "Pretendard Black"
+        ],
+        "4": [
+          "Pretendard Black"
+        ],
+        "5": [
+          "Version 1.309"
+        ],
+        "6": [
+          "Pretendard-Black"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL"
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "Pretendard-LICENSE.txt"
+      ],
+      "projectSourceUrl": "https://github.com/orioncactus/pretendard",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/orioncactus/pretendard/main/LICENSE"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "Pretendard-Bold.woff2",
+      "bytes": 791156,
+      "sha256": "4609c3356e536fafe38f4add0daeceb3d8595d3057bce13c428c33ddbd43d362",
+      "names": {
+        "0": [
+          "Copyright © 2023 Kil Hyung-jin"
+        ],
+        "1": [
+          "Pretendard"
+        ],
+        "4": [
+          "Pretendard Bold"
+        ],
+        "5": [
+          "Version 1.309"
+        ],
+        "6": [
+          "Pretendard-Bold"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL"
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "Pretendard-LICENSE.txt"
+      ],
+      "projectSourceUrl": "https://github.com/orioncactus/pretendard",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/orioncactus/pretendard/main/LICENSE"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "Pretendard-ExtraBold.woff2",
+      "bytes": 793540,
+      "sha256": "dd7c1e156f508eb962acc7a33a7a1896d1e0b71e11156fad96e731689ceb6dc3",
+      "names": {
+        "0": [
+          "Copyright © 2023 Kil Hyung-jin"
+        ],
+        "1": [
+          "Pretendard ExtraBold"
+        ],
+        "4": [
+          "Pretendard ExtraBold"
+        ],
+        "5": [
+          "Version 1.309"
+        ],
+        "6": [
+          "Pretendard-ExtraBold"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL"
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "Pretendard-LICENSE.txt"
+      ],
+      "projectSourceUrl": "https://github.com/orioncactus/pretendard",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/orioncactus/pretendard/main/LICENSE"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "Pretendard-ExtraLight.woff2",
+      "bytes": 734392,
+      "sha256": "df43dc9165dff4542114674bcd8b79b7daae6dec004004586d5d076fec6fe2aa",
+      "names": {
+        "0": [
+          "Copyright © 2023 Kil Hyung-jin"
+        ],
+        "1": [
+          "Pretendard ExtraLight"
+        ],
+        "4": [
+          "Pretendard ExtraLight"
+        ],
+        "5": [
+          "Version 1.309"
+        ],
+        "6": [
+          "Pretendard-ExtraLight"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL"
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "Pretendard-LICENSE.txt"
+      ],
+      "projectSourceUrl": "https://github.com/orioncactus/pretendard",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/orioncactus/pretendard/main/LICENSE"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "Pretendard-Light.woff2",
+      "bytes": 757000,
+      "sha256": "b7426635cce2ea2b95c9c802e43fba1c620e0dafaf25f737c069b8b4e09fa841",
+      "names": {
+        "0": [
+          "Copyright © 2023 Kil Hyung-jin"
+        ],
+        "1": [
+          "Pretendard Light"
+        ],
+        "4": [
+          "Pretendard Light"
+        ],
+        "5": [
+          "Version 1.309"
+        ],
+        "6": [
+          "Pretendard-Light"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL"
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "Pretendard-LICENSE.txt"
+      ],
+      "projectSourceUrl": "https://github.com/orioncactus/pretendard",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/orioncactus/pretendard/main/LICENSE"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "Pretendard-Medium.woff2",
+      "bytes": 778432,
+      "sha256": "d03481330eeba0659ab5b87f25ceb504a35de377dd90a0d0aba2982eb2d05e2c",
+      "names": {
+        "0": [
+          "Copyright © 2023 Kil Hyung-jin"
+        ],
+        "1": [
+          "Pretendard Medium"
+        ],
+        "4": [
+          "Pretendard Medium"
+        ],
+        "5": [
+          "Version 1.309"
+        ],
+        "6": [
+          "Pretendard-Medium"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL"
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "Pretendard-LICENSE.txt"
+      ],
+      "projectSourceUrl": "https://github.com/orioncactus/pretendard",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/orioncactus/pretendard/main/LICENSE"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "Pretendard-Regular.woff2",
+      "bytes": 765892,
+      "sha256": "fad853f7f47c6c8b103171e7193fa095708cdcd70850a71d93aa5379e8a61d63",
+      "names": {
+        "0": [
+          "Copyright © 2023 Kil Hyung-jin"
+        ],
+        "1": [
+          "Pretendard"
+        ],
+        "4": [
+          "Pretendard Regular"
+        ],
+        "5": [
+          "Version 1.309"
+        ],
+        "6": [
+          "Pretendard-Regular"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL"
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "Pretendard-LICENSE.txt"
+      ],
+      "projectSourceUrl": "https://github.com/orioncactus/pretendard",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/orioncactus/pretendard/main/LICENSE"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "Pretendard-SemiBold.woff2",
+      "bytes": 785856,
+      "sha256": "c863f76a7de5c1ddc1ed8b2fa794964530774592c4f31407a84e2a2ae93f17f0",
+      "names": {
+        "0": [
+          "Copyright © 2023 Kil Hyung-jin"
+        ],
+        "1": [
+          "Pretendard SemiBold"
+        ],
+        "4": [
+          "Pretendard SemiBold"
+        ],
+        "5": [
+          "Version 1.309"
+        ],
+        "6": [
+          "Pretendard-SemiBold"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL"
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "Pretendard-LICENSE.txt"
+      ],
+      "projectSourceUrl": "https://github.com/orioncactus/pretendard",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/orioncactus/pretendard/main/LICENSE"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "Pretendard-Thin.woff2",
+      "bytes": 694804,
+      "sha256": "1539755224a64719d5b18406762c476db74fcc299b9e4641ca1e9812fbc7a09b",
+      "names": {
+        "0": [
+          "Copyright © 2023 Kil Hyung-jin"
+        ],
+        "1": [
+          "Pretendard Thin"
+        ],
+        "4": [
+          "Pretendard Thin"
+        ],
+        "5": [
+          "Version 1.309"
+        ],
+        "6": [
+          "Pretendard-Thin"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL"
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "Pretendard-LICENSE.txt"
+      ],
+      "projectSourceUrl": "https://github.com/orioncactus/pretendard",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/orioncactus/pretendard/main/LICENSE"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    },
+    {
+      "file": "SourceHanSerifK-OldHangul-subset.woff2",
+      "bytes": 239900,
+      "sha256": "b58cb0f0ab1c354afd61597f55d816a579344babe3b49826d6927f2792ff3ae9",
+      "names": {
+        "0": [
+          "© 2017-2024 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'."
+        ],
+        "1": [
+          "LIDGE Old Hangul Serif"
+        ],
+        "3": [
+          "2.003;LIDGE;LIDGEOldHangulSerif-Regular"
+        ],
+        "4": [
+          "LIDGE Old Hangul Serif"
+        ],
+        "5": [
+          "Version 2.003;hotconv 1.1.1;makeotfexe 2.6.0"
+        ],
+        "6": [
+          "LIDGEOldHangulSerif-Regular"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "SourceHanSerifK-LICENSE.txt"
+      ],
+      "projectSourceUrl": "https://github.com/adobe-fonts/source-han-serif",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/adobe-fonts/source-han-serif/release/LICENSE.txt"
+      ],
+      "originalArchiveMatch": null,
+      "status": "renamed-derived-font; invariants-verified",
+      "finalRenamedAssetSha256": "b58cb0f0ab1c354afd61597f55d816a579344babe3b49826d6927f2792ff3ae9",
+      "rfnGuidanceUrl": "https://openfontlicense.org/webfonts-and-reserved-font-names/",
+      "preRename": {
+        "bytes": 239628,
+        "sha256": "9e419cd16df2ea3b220aa7751320d956ac2493440ba412484d98325078f09d43",
+        "names": {
+          "0": [
+            "© 2017-2024 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'."
+          ],
+          "1": [
+            "Source Han Serif K"
+          ],
+          "4": [
+            "Source Han Serif K"
+          ],
+          "5": [
+            "Version 2.003;hotconv 1.1.1;makeotfexe 2.6.0"
+          ],
+          "6": [
+            "SourceHanSerifK-Regular"
+          ]
+        }
+      },
+      "primaryName": "LIDGE Old Hangul Serif",
+      "postscriptName": "LIDGEOldHangulSerif-Regular",
+      "relatedAssets": [
+        {
+          "asset": "ttfs/opensource/SourceHanSerifK-OldHangul-subset.otf",
+          "bytes": 456680,
+          "sha256": "f130fc3542fc77284b6520a2ff162a9f11a66d8d1789aae74850b8412995c466",
+          "names": {
+            "0": [
+              "© 2017-2024 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'."
+            ],
+            "1": [
+              "LIDGE Old Hangul Serif"
+            ],
+            "3": [
+              "2.003;LIDGE;LIDGEOldHangulSerif-Regular"
+            ],
+            "4": [
+              "LIDGE Old Hangul Serif"
+            ],
+            "5": [
+              "Version 2.003;hotconv 1.1.1;makeotfexe 2.6.0"
+            ],
+            "6": [
+              "LIDGEOldHangulSerif-Regular"
+            ]
+          },
+          "preRename": {
+            "bytes": 456688,
+            "sha256": "2f86ef9a52acb6d1dad9d915843239123b635d97edd88fd0573a88ffcb4e16f1"
+          }
+        }
+      ],
+      "renameVerification": {
+        "date": "2026-09-27",
+        "command": "python scripts/rename-sourcehan-subset.py --check",
+        "tooling": {
+          "fonttools": "4.62.1",
+          "brotli": "1.2.0"
+        },
+        "status": "PASS",
+        "woff2SfntConsistent": true,
+        "idempotent": true,
+        "baselineInvariantsSha256": "cb69fd41bfd966a28ce614a44e9786283dc45d696decc1b98e69f9633598e6cd",
+        "glyphCount": 2215,
+        "unicodeMappingCount": 357,
+        "unchangedNameRecordsSha256": "26655f2aa8fdadd3f8a5b98fbba46324199d04833e957d114825b58acc8fdf68",
+        "glyphOrderSha256": "0435e34909f74561fb269502e21f7b4390ed2a49683b400d060ba8ab00a9b019",
+        "outlinesSha256": "7a017dbeae9b2589c30e79a9f9e6577abf17a5d7348af2af3c6d8738763d1868",
+        "charstringsAndSubroutinesSha256": "59d8a12970d452b19f86992438f6f317dda0b95cf3b15390df020c8616ad27ee",
+        "unchangedTables": {
+          "BASE": "826960f1b2b8109f631284d5017c3d9c9e4528bc84ccfeaa9da95808467028fe",
+          "GPOS": "4248d50788c18755904654f23d0e86b4bc021d4248ac55e1edc8f6f713dc0942",
+          "GSUB": "13bb9f79713761c85ee47e5ea77a1f0cada029d48950f60b1d70ded4dfdc3500",
+          "OS/2": "2faf1d27a073637a9fca81d3601efd4cde7f9c9d9aeaae981edfe0f8064fd2c8",
+          "VORG": "4a17e6fc73d759f32d898218d81500a7788bc56d242b7a580a8f3503ca4111c6",
+          "cmap": "201565e395b6d60cc768b701bcbecbbb3fd6e267e2645ffbd5f2f1e10c35314f",
+          "hhea": "514329c26216be14d8902a878a82666872086b9746b1eb9965433b91861e57a7",
+          "hmtx": "871e650d050bbf3dd38abbc0e1f87edc15080e9764d1b55e58c28ea610a82361",
+          "maxp": "32332b5a619572c1f55744b2286eb6f05162d9ca79cd45bf05d9edf5de5f30ab",
+          "post": "77a232e4db6b60c21f7b76ccf821e3c80c519901f11d10efb8c8df04ca82a4e8",
+          "vhea": "a44e00c4af5d6b5be5e5868bbcfa7076e3176686e5ebe21ca83f88da7ba1fe7e",
+          "vmtx": "ab00d27d328b0c6587a80d633b940370cfa0d2beb7553b1e8b01d428473a758c",
+          "head_except_checksum": "82666d4e03096e08299bbd1566e82a564b073f595e883189ac46a2ae165f2468"
+        },
+        "attributionAndLicensePreserved": true,
+        "compatibilityFilenamesPreserved": true
+      }
+    },
+    {
+      "file": "SpoqaHanSans-Regular.woff2",
+      "bytes": 275144,
+      "sha256": "6568bf80b50c14f2e54f56f2c07e668416f39f880baf5ea2825d315767f98f69",
+      "names": {
+        "0": [
+          "Copyright  2015 Spoqa (http://bi.spoqa.com/)"
+        ],
+        "1": [
+          "SpoqaHanSans"
+        ],
+        "4": [
+          "SpoqaHanSans-Regular"
+        ],
+        "5": [
+          "Version 1.004;PS 1.004;hotconv 1.0.82;makeotf.lib2.5.63406"
+        ],
+        "6": [
+          "SpoqaHanSans-Regular"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This Font Software is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the SIL Open Font License for the specific language, permissions and limitations governing your use of this Font Software."
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "license": "OFL-1.1",
+      "licenseFiles": [
+        "SpoqaHanSans-LICENSE.txt"
+      ],
+      "projectSourceUrl": "https://github.com/spoqa/spoqa-han-sans",
+      "licenseSourceUrls": [
+        "https://raw.githubusercontent.com/spoqa/spoqa-han-sans/master/LICENSE"
+      ],
+      "originalArchiveMatch": null,
+      "status": "metadata-and-license-reviewed; original-font-byte-match-not-tested"
+    }
+  ],
+  "licenseOriginals": [
+    {
+      "file": "OFL-1.1.txt",
+      "url": "https://openfontlicense.org/documents/OFL.txt",
+      "bytes": 4599,
+      "sha256": "1d361a8f8e8ce6e68457dcd93fb56e162e6baa3bbb7e7573a290d44399f6b57e"
+    },
+    {
+      "file": "Pretendard-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/orioncactus/pretendard/main/LICENSE",
+      "bytes": 4816,
+      "sha256": "82e9c8a4b203261f10ddba1296422d64914ff3d4b7bd8a12896d03f0f088d70a"
+    },
+    {
+      "file": "D2Coding-OFL.txt",
+      "url": "https://raw.githubusercontent.com/naver/d2-coding-font/master/OFL.txt",
+      "bytes": 4511,
+      "sha256": "1807e8dec4d65f474cbf9be39f5e2254ecb81702babc320749e272ea66ffcc69"
+    },
+    {
+      "file": "SpoqaHanSans-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/spoqa/spoqa-han-sans/master/LICENSE",
+      "bytes": 4562,
+      "sha256": "279753543734e7a1846e3cb3f80d4dcdcc91f49c436411adaba82e3913c61cde"
+    },
+    {
+      "file": "GowunBatang-OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/gowunbatang/OFL.txt",
+      "bytes": 4397,
+      "sha256": "49a57cc769fa9affd6eefb9070a61e3d3f6b757c97cafb15848bc6d1c81acc78"
+    },
+    {
+      "file": "GowunDodum-OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/gowundodum/OFL.txt",
+      "bytes": 4395,
+      "sha256": "a7c73f9521cd646bbdfb6684c99a62311bbd7bce11898dc11ef0b3c69eda1aca"
+    },
+    {
+      "file": "NanumGothic-OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/OFL.txt",
+      "bytes": 4534,
+      "sha256": "eeacf16032901d0ed0456876ec77b8f0fda6b3fecec7d972f8543eb602e6c30f"
+    },
+    {
+      "file": "NanumMyeongjo-OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanummyeongjo/OFL.txt",
+      "bytes": 4497,
+      "sha256": "8eb1c1019fe7fe6d0b6e7d7bbbba1d9cbdd969d8c5f26455708f6cfb8a77284c"
+    },
+    {
+      "file": "NanumGothicCoding-OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothiccoding/OFL.txt",
+      "bytes": 4534,
+      "sha256": "eeacf16032901d0ed0456876ec77b8f0fda6b3fecec7d972f8543eb602e6c30f"
+    },
+    {
+      "file": "NotoSansKR-OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/OFL.txt",
+      "bytes": 4388,
+      "sha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9"
+    },
+    {
+      "file": "NotoSerifKR-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Serif/LICENSE",
+      "bytes": 4301,
+      "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"
+    },
+    {
+      "file": "SourceHanSerifK-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/adobe-fonts/source-han-serif/release/LICENSE.txt",
+      "bytes": 4463,
+      "sha256": "9ff5bb567e1b92c801fc1069e5fbf992ff8efccacb9db94e5959a5b3ba9bb903"
+    },
+    {
+      "file": "GUST-FONT-LICENSE.txt",
+      "url": "https://mirrors.ibiblio.org/CTAN/fonts/lm-math/doc/GUST-FONT-LICENSE.txt",
+      "bytes": 1456,
+      "sha256": "2bd69affc3da00715116f713f57eab9707e96daf3562ad0215987b15b9c16f73"
+    },
+    {
+      "file": "LPPL-1.3c.txt",
+      "url": "https://www.latex-project.org/lppl/lppl-1-3c.txt",
+      "bytes": 19102,
+      "sha256": "3d262cdf34dafa6955f703c634a8c238ec44109bc8dd6ef34fb7aa54809f7e66"
+    },
+    {
+      "file": "README-Latin-Modern-Math.txt",
+      "url": "https://mirrors.ibiblio.org/CTAN/fonts/lm-math/doc/README-Latin-Modern-Math.txt",
+      "bytes": 4588,
+      "sha256": "e6fdd5fb44b656146fa988d191f58901c09a347d3f4fbaa3b45b24a6ad7ec30b"
+    },
+    {
+      "file": "MANIFEST-Latin-Modern-Math.txt",
+      "url": "https://mirrors.ibiblio.org/CTAN/fonts/lm-math/doc/MANIFEST-Latin-Modern-Math.txt",
+      "bytes": 2186,
+      "sha256": "1daa729f7922c42ba5ce8da7dfe4ecdc9e5c878ad86217fd6f32c4671505b007"
+    },
+    {
+      "file": "License-Ssurround.pdf",
+      "url": "https://img.cafe24.com/csdstatic/freefonts/download/kr/Cafe24Ssurround-v2.0.zip",
+      "member": "Cafe24Ssurround-v2.0/License-Ssurround.pdf",
+      "bytes": 1945706,
+      "sha256": "de2158b3dc8aa27513451108fb09088f9afd8fce1d65c2cac29c7e554b37a7d9"
+    },
+    {
+      "file": "License-Supermagic.pdf",
+      "url": "https://img.cafe24.com/csdstatic/freefonts/download/kr/Cafe24Supermagic-Regular-v1.0.zip",
+      "member": "Cafe24Supermagic-Regular-v1.0/License-Supermagic.pdf",
+      "bytes": 1944287,
+      "sha256": "bdf5e278410f73faaf5a34db9ad4ce328cabd673d8f699bd986869a690193511"
+    },
+    {
+      "file": "HapinessSans_License.pdf",
+      "url": "https://thehyundaifont.com/assets/fonts/HappinessSans-Screen.zip",
+      "member": "screen/HapinessSans_License.pdf",
+      "bytes": 194608,
+      "sha256": "f5bd344131ee034f3425517ea376ab6acea9126310e7b2cd74cd18673991b055"
+    }
+  ],
+  "remaining": [
+    "Latin Modern Math WOFF2 conversion provenance has not been independently reproduced; bundled upstream README/MANIFEST and source URLs are provided.",
+    "Except the six Cafe24/Happiness fonts, original upstream binary equality was not tested. License originals and embedded metadata are separate evidence."
+  ]
+}

@@ -1,0 +1,21 @@
+title = "LIDGE HWP secret scanning"
+
+[extend]
+useDefault = true
+
+# Exact non-credential lines in upstream tests. Do not ignore entire source files.
+[[allowlists]]
+description = "Token-count algorithm identifier, not an authentication token"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''(^|/)rhwp/src/rag/chunker\.rs$''']
+regexTarget = "line"
+regexes = ['''^\s*assert_eq!\(TOKEN_ESTIMATOR, "cjk1-latin4-v1"\);\s*$''']
+
+[[allowlists]]
+description = "Layout fixture identifiers, not credentials"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''(^|/)rhwp/tests/issue_1139_inline_picture_duplicate\.rs$''']
+regexTarget = "line"
+regexes = ['''^\s*key: "2024-11-practice-(shape987|above0-between0-below0|above0-between7-below2|above0-between7-below20|above20-between0-below20|above20-between7-below2)",\s*$''']
