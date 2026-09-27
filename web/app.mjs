@@ -2,8 +2,9 @@ import { createStudio } from '/editor/index.js';
 import { startAgentChannel } from '/agent-channel.mjs';
 import { followSwitch } from '/follow-switch.mjs';
 import { copyPath, isCopyPathShortcut } from '/copy-path.mjs';
+import { isNewDocShortcut } from '/new-doc.mjs';
 import { initSidebar } from '/sidebar.mjs';
-import { groupDocs, groupKeyOf, matchDoc, renderProjects, readCollapsedGroups, writeCollapsedGroups, bindListKeys, displayName } from '/projects.mjs';
+import { groupDocs, groupKeyOf, createGroupFor, matchDoc, renderProjects, readCollapsedGroups, writeCollapsedGroups, bindListKeys, displayName } from '/projects.mjs';
 
 initSidebar();
 
@@ -17,6 +18,7 @@ const externalList = document.querySelector('#external-docs');
 const status = document.querySelector('#status');
 const filename = document.querySelector('#filename');
 const saveButton = document.querySelector('#save');
+const newButton = document.querySelector('#new-doc');
 const copyPathButton = document.querySelector('#copy-path');
 let studio;
 let current = null;
@@ -203,6 +205,12 @@ async function save() {
 // 프로젝트 그룹 상태(wp5). 접힌 그룹 키는 localStorage에, 필터는 세션에만 둔다.
 let groups = [];
 let externalGroups = [];
+let selectedGroupKey = null;
+let creating = false;
+for (const docList of [list, externalList]) docList.addEventListener('focusin', (event) => {
+  const group = event.target?.closest?.('.group');
+  if (group) selectedGroupKey = group.querySelector('.group-header')?.dataset.group ?? null;
+});
 const nameOf = id => displayName(id, externalGroups);
 let collapsedGroups = readCollapsedGroups();
 let openHadListFocus = false; // 목록에서 연 열기는 loadFile이 iframe으로 뺏은 포커스를 목록에 돌려놓는다
@@ -274,6 +282,48 @@ async function loadDocs() {
   ({ primary: groups, external: externalGroups } = groupDocs(docs, projects, roots));
   renderDocs();
   say(docs.length === 0 ? '문서함에 HWP/HWPX가 없습니다.' : '문서를 선택하세요.');
+}
+
+async function newDocument(name) {
+  if (creating) return { ok: false, created: null };
+  creating = true;
+  try {
+    let response;
+    try {
+      response = await api('/api/docs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ group: createGroupFor([...groups, ...externalGroups], selectedGroupKey, current?.id),
+          ...(name ? { name } : {}) }) });
+    } catch (error) {
+      if (error instanceof TypeError) {
+        selectedGroupKey = null;
+        try { await loadDocs(); } catch { /* outcome is unknown */ }
+        selectedGroupKey = null;
+        say('새 문서 결과 확인 불가 · 목록을 확인하세요');
+        return { ok: true, created: null };
+      }
+      say(`새 문서 실패: ${error.message}`);
+      return { ok: false, created: null };
+    }
+    selectedGroupKey = null;
+    let created;
+    try { created = await response.json(); }
+    catch {
+      try { await loadDocs(); } catch { /* outcome is unknown */ }
+      selectedGroupKey = null;
+      say('새 문서 결과 확인 불가 · 목록을 확인하세요');
+      return { ok: true, created: null };
+    }
+    try {
+      await loadDocs();
+      const opened = await openDoc(created.id);
+      say(opened ? `새 문서 ${nameOf(created.id)} · 커밋 ${created.commit.slice(0, 7)}`
+        : `새 문서 ${nameOf(created.id)} 만들었음 · 목록에서 열 수 있습니다`);
+    } catch (error) {
+      say(`새 문서 ${nameOf(created.id)} 만들었음 · 목록 갱신/열기 실패: ${error.message}`);
+    }
+    selectedGroupKey = null;
+    return { ok: true, created };
+  } finally { creating = false; }
 }
 
 function rowFor(id) {
@@ -397,6 +447,11 @@ document.addEventListener('keydown', event => {
 });
 copyPathButton.addEventListener('click', () => { void copyDocumentPath(current?.id ?? null); });
 document.addEventListener('keydown', event => {
+  if (!isNewDocShortcut(event)) return;
+  event.preventDefault();
+  if (!creating) void newDocument();
+});
+document.addEventListener('keydown', event => {
   const cmd = event.metaKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'r';
   const f2 = event.key === 'F2' && !event.metaKey && !event.ctrlKey && !event.altKey;
   if (!cmd && !f2) return;
@@ -446,6 +501,35 @@ async function removeFolder(group) {
 }
 
 // 새 프로젝트: "+"가 목록 맨 위에 인라인 입력 행을 연다. IME 조합 중 Enter는 제출이 아니라 조합 확정이다.
+newButton.addEventListener('click', () => {
+  if (creating || list.querySelector('.new-doc-row')) return;
+  const row = document.createElement('li');
+  row.className = 'new-doc-row';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = '이름 생략 가능 · Enter로 만들기';
+  input.setAttribute('aria-label', '새 한글 문서 이름');
+  let composing = false;
+  let pending = false;
+  input.addEventListener('compositionstart', () => { composing = true; });
+  input.addEventListener('compositionend', () => { composing = false; });
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !pending) {
+      event.preventDefault(); row.remove(); newButton.focus(); return;
+    }
+    if (event.key !== 'Enter' || composing || event.isComposing || pending) return;
+    event.preventDefault();
+    pending = true;
+    input.readOnly = true;
+    void newDocument(input.value.trim() || undefined).then(({ ok }) => {
+      if (ok) row.remove();
+      else if (row.isConnected) { pending = false; input.readOnly = false; input.focus(); }
+      else newButton.focus();
+    });
+  });
+  row.append(input); list.prepend(row); input.focus();
+});
+
 projectAdd.addEventListener('click', () => {
   if (list.querySelector('.create-row')) return;
   const row = document.createElement('li');

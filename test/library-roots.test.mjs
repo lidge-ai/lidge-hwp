@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rename, symlink, stat, rm, chmod, cp } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rename, symlink, stat, lstat, rm, chmod, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -42,6 +42,32 @@ async function fixture(t) {
   return { root, docs, extra, stateDir, registry, added, id, start };
 }
 const docUrl = (base, id) => `${base}/api/docs/${encodeURIComponent(id)}`;
+
+test('external root uses shadow history and rollback for new HWP', async t => {
+  const f = await fixture(t);
+  const { base } = await f.start();
+  const post = name => fetch(`${base}/api/docs`, { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: base },
+    body: JSON.stringify({ group: { kind: 'external', key: f.added.key }, ...(name ? { name } : {}) }),
+  });
+  const response = await post();
+  assert.equal(response.status, 201);
+  const created = await response.json();
+  assert.equal(created.id, `ext://${f.added.key}/새 문서.hwp`);
+  assert.match(created.commit, /^[0-9a-f]{40}$/);
+  await assert.rejects(lstat(join(f.extra, '.git')), { code: 'ENOENT' });
+  const gitDir = join(f.stateDir, 'history', f.added.key);
+  const args = ['--git-dir', gitDir, '--work-tree', f.extra];
+  const names = await git('git', [...args, '-c', 'core.quotePath=false', 'show', '--format=', '--name-only', 'HEAD']);
+  assert.equal(names.stdout.trim(), '새 문서.hwp');
+  await writeFile(join(gitDir, 'hooks', 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  const failed = await post('doomed.hwp');
+  assert.equal(failed.status, 500);
+  assert.equal((await failed.json()).error.code, 'COMMIT_FAILED');
+  await assert.rejects(readFile(join(f.extra, 'doomed.hwp')), { code: 'ENOENT' });
+  const staged = await git('git', [...args, 'ls-files', '--stage', '--', 'doomed.hwp']);
+  assert.equal(staged.stdout.trim(), '');
+});
 
 test('GET external /path returns its exact realpath without creating .git in the source', async t => {
   const f = await fixture(t);

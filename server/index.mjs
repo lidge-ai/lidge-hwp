@@ -22,7 +22,8 @@ const json = (res, status, value) => {
 function requiresOrigin(pathname, method) {
   return (method === 'POST' && pathname === '/api/roots/pick')
     || (method === 'DELETE' && pathname.startsWith('/api/roots/'))
-    || (method === 'POST' && pathname.startsWith('/api/docs/') && pathname.endsWith('/rename'));
+    || (method === 'POST' && pathname.startsWith('/api/docs/') && pathname.endsWith('/rename'))
+    || (method === 'POST' && pathname === '/api/docs');
 }
 async function readSmallJson(req) {
   const chunks = [];
