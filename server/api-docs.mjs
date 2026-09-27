@@ -83,12 +83,13 @@ export function createDocsApi({ store, tabs, pickFolder }) {
       return true;
     }
     if (!pathname.startsWith('/api/docs/')) return false;
-    const isRename = pathname.endsWith('/rename');
-    const rawId = pathname.slice('/api/docs/'.length, isRename ? -'/rename'.length : undefined);
+    const suffix = pathname.endsWith('/rename') ? '/rename'
+      : pathname.endsWith('/path') ? '/path' : '';
+    const rawId = pathname.slice('/api/docs/'.length, suffix ? -suffix.length : undefined);
     let id;
     try { id = decodeURIComponent(rawId); }
     catch { error(res, 400, 'INVALID_ID'); return true; }
-    if (isRename) {
+    if (suffix === '/rename') {
       if (req.method !== 'POST') { error(res, 405, 'METHOD_NOT_ALLOWED'); return true; }
       try {
         if (store.isQuarantined(id)) { error(res, 423, 'DOCUMENT_QUARANTINED'); return true; }
@@ -114,6 +115,12 @@ export function createDocsApi({ store, tabs, pickFolder }) {
         const code = cause instanceof SyntaxError ? 'INVALID_JSON' : cause.code || 'RENAME_FAILED';
         error(res, cause.status || (code === 'INVALID_JSON' ? 400 : 500), code);
       }
+      return true;
+    }
+    if (suffix === '/path') {
+      if (req.method !== 'GET') { error(res, 405, 'METHOD_NOT_ALLOWED'); return true; }
+      try { send(res, 200, { path: await store.canonicalPath(id) }); }
+      catch (cause) { error(res, cause.status || 500, cause.code || 'PATH_FAILED'); }
       return true;
     }
     if (req.method === 'GET') {
