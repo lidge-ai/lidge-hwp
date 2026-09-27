@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { groupDocs, groupKeyOf, matchDoc, readCollapsedGroups } from '../web/projects.mjs';
+import { groupDocs, groupKeyOf, matchDoc, readCollapsedGroups, renderProjects, displayName } from '../web/projects.mjs';
 
 test('groupDocs groups by top-level folder, root docs last as 기타, names keep nested paths', () => {
   const docs = [
@@ -9,22 +9,31 @@ test('groupDocs groups by top-level folder, root docs last as 기타, names keep
     { id: 'a-project/b.hwp', format: 'hwp' },
     { id: 'root.hwp', format: 'hwp' },
   ];
-  const groups = groupDocs(docs);
+  const { primary: groups, external } = groupDocs(docs);
+  assert.deepEqual(external, []);
   assert.deepEqual(groups.map((g) => g.key), ['a-project', 'b-project', '']);
   assert.equal(groups[2].label, '기타');
   assert.deepEqual(groups[0].docs.map((d) => d.name), ['b.hwp', 'sub/a.hwpx']);
   assert.equal(groups[0].docs[1].id, 'a-project/sub/a.hwpx');
 });
 
+test('displayName shows folder label and path for external ids, raw id otherwise', () => {
+  const key = '5cbf9b36-467f-42e7-847f-40c018f72bb1';
+  const external = [{ key: `ext://${key}`, label: '자료', docs: [] }];
+  assert.equal(displayName(`ext://${key}/하위/a.hwpx`, external), '자료/하위/a.hwpx');
+  assert.equal(displayName(`ext://${key}/a.hwpx`, []), 'a.hwpx');
+  assert.equal(displayName('프로젝트/b.hwp', external), '프로젝트/b.hwp');
+});
+
 test('groupDocs sorts groups and docs with ko localeCompare', () => {
-  const groups = groupDocs([
+  const { primary: groups } = groupDocs([
     { id: '다/b.hwp', format: 'hwp' }, { id: '가/a.hwp', format: 'hwp' },
   ]);
   assert.deepEqual(groups.map((g) => g.key), ['가', '다']);
 });
 
 test('groupDocs includes empty projects as empty groups', () => {
-  const groups = groupDocs([{ id: 'a/x.hwp', format: 'hwp' }], ['a', 'empty-proj']);
+  const { primary: groups } = groupDocs([{ id: 'a/x.hwp', format: 'hwp' }], ['a', 'empty-proj']);
   assert.deepEqual(groups.map((g) => g.key), ['a', 'empty-proj']);
   assert.deepEqual(groups[1].docs, []);
 });
@@ -42,6 +51,7 @@ test('matchDoc is case-insensitive substring over NFC-normalized id', () => {
 test('groupKeyOf returns top-level folder or root key', () => {
   assert.equal(groupKeyOf('a/b/c.hwp'), 'a');
   assert.equal(groupKeyOf('a.hwp'), '');
+  assert.equal(groupKeyOf('ext://11111111-1111-4111-8111-111111111111/a.hwpx'), 'ext://11111111-1111-4111-8111-111111111111');
 });
 
 test('readCollapsedGroups parses a JSON array of keys and tolerates garbage', () => {
@@ -72,7 +82,7 @@ test('renderProjects gives documents path labels and hides format/count badges f
   try {
     const { renderProjects } = await import('../web/projects.mjs');
     const list = fakeElement('ul');
-    const groups = groupDocs([{ id: 'samples/a.hwp', format: 'hwp' }, { id: 'samples/b.hwpx', format: 'hwpx' }], ['samples']);
+    const { primary: groups } = groupDocs([{ id: 'samples/a.hwp', format: 'hwp' }, { id: 'samples/b.hwpx', format: 'hwpx' }], ['samples']);
     renderProjects(list, groups, { currentId: 'samples/b.hwpx' });
     const nodes = walk(list);
     const docs = nodes.filter((n) => n.className === 'doc');
@@ -81,5 +91,34 @@ test('renderProjects gives documents path labels and hides format/count badges f
     for (const badge of nodes.filter((n) => n.className === 'badge' || n.className === 'count')) assert.equal(badge.getAttribute('aria-hidden'), 'true');
     const header = nodes.find((n) => n.className === 'group-header');
     assert.equal(header.getAttribute('aria-label'), 'samples 프로젝트, 문서 2개');
+  } finally { delete globalThis.document; }
+});
+
+test('external ids group by UUID and unavailable roots retain label, path, and reason', () => {
+  globalThis.document = { createElement: fakeElement, createElementNS: (_ns, tag) => fakeElement(tag) };
+  try {
+    const key = '11111111-1111-4111-8111-111111111111';
+    const emptyKey = '22222222-2222-4222-8222-222222222222';
+    const { primary, external } = groupDocs([{ id: `ext://${key}/a.hwpx`, format: 'hwpx' }], [], [
+      { key, label: '자료', path: '/tmp/자료', available: false, reason: 'MISSING' },
+      { key: emptyKey, label: '교체', path: '/tmp/교체', available: false, reason: 'REPLACED' },
+    ]);
+    assert.deepEqual(primary, []);
+    assert.deepEqual(external.map(g => g.key), [`ext://${key}`, `ext://${emptyKey}`]);
+    assert.deepEqual(external[0].docs.map(d => d.name), ['a.hwpx']);
+    const list = fakeElement('ul');
+    let imports = 0;
+    renderProjects(list, external, { onImport: () => { imports++; } });
+    const nodes = walk(list);
+    const headers = nodes.filter(n => n.className === 'group-header');
+    assert.deepEqual(headers.map(h => h.title), ['/tmp/자료', '/tmp/교체']);
+    assert.deepEqual(headers.map(h => h.dataset.reason), ['MISSING', 'REPLACED']);
+    assert.match(headers[0].getAttribute('aria-label'), /찾을 수 없음.*추가한 폴더/);
+    assert.match(headers[1].getAttribute('aria-label'), /다른 폴더로 바뀜.*추가한 폴더/);
+    const docButton = nodes.find(n => n.className === 'doc');
+    assert.equal(docButton.dataset.id, `ext://${key}/a.hwpx`);
+    assert.equal(docButton.title, '자료/a.hwpx', 'tooltip hides the internal ext:// id');
+    assert.equal(docButton.getAttribute('aria-label'), '자료/a.hwpx');
+    assert.equal(imports, 0);
   } finally { delete globalThis.document; }
 });

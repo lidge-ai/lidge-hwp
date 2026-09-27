@@ -17,7 +17,7 @@ test('studio service worker is replaced by a self-unregistering script and regis
   await writeFile(join(build, 'studio', 'registerSW.js'), "navigator.serviceWorker.register('/studio/sw.js')");
   await writeFile(join(build, 'studio', 'index.html'), '<!doctype html>');
   await git('git', ['-C', docs, 'init', '-q']);
-  const server = await createServer({ docsRoot: docs, buildDir: build, startAgentSocket: null });
+  const server = await createServer({ docsRoot: docs, stateDir: join(root, 'state'), buildDir: build, startAgentSocket: null });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
   const base = 'http://127.0.0.1:' + server.address().port;
@@ -40,7 +40,8 @@ test('사이드바 토글·구분선 마크업과 접힘 CSS·저장 키가 셸�
   const docs = join(root, 'docs');
   await mkdir(docs);
   await git('git', ['-C', docs, 'init', '-q']);
-  const server = await createServer({ docsRoot: docs, buildDir: join(root, 'build'), startAgentSocket: null });
+  const server = await createServer({ docsRoot: docs, stateDir: join(root, 'state'),
+    buildDir: join(root, 'build'), startAgentSocket: null });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
   const base = 'http://127.0.0.1:' + server.address().port;
@@ -50,11 +51,14 @@ test('사이드바 토글·구분선 마크업과 접힘 CSS·저장 키가 셸�
   assert.match(html, /<aside id="doc-list" aria-label="문서 목록">/);
   assert.match(html, /id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="doc-list"/);
   assert.match(html, /id="doc-filter" type="search" placeholder="문서 찾기"/);
+  assert.match(html, /id="folder-add" type="button"/);
+  assert.match(html, /id="external-docs" aria-label="추가한 폴더"/);
   const sidebar = await (await fetch(base + '/sidebar.mjs')).text();
   assert.match(sidebar, /'lidge-hwp\.sidebar'/);
   assert.match(sidebar, /'lidge-hwp\.sidebar-width'/);
   const css = await (await fetch(base + '/style.css')).text();
   assert.match(css, /body\[data-sidebar="collapsed"\] \.layout \{ grid-template-columns: 2\.75rem/);
+  assert.match(css, /#external-docs \.group-header\[data-reason\]/);
   // 머리 줄 하나(wp6): 문서 이름·상태·저장이 header에 모이고, 편집 영역은 남은 높이를 flex로 채운다.
   const header = html.split('<header>')[1].split('</header>')[0];
   for (const id of ['filename', 'status', 'save']) assert.match(header, new RegExp(`id="${id}"`));

@@ -232,7 +232,12 @@ function emitChanged(deps: AgentOpsDeps, event: { schemaVersion: 1; reason: 'age
 export async function applyOps(batch: AgentBatch, deps: AgentOpsDeps): Promise<AgentApplyReceipt> {
   deps.lock.assertAgent(batch?.token);
   assertBatch(batch);
-  const state = deps.controller.getDocumentState();
+  let state: ReturnType<DocumentAgentController['getDocumentState']>;
+  try { state = deps.controller.getDocumentState(); }
+  catch (error) {
+    throw new LidgeAgentError('INITIAL_STATE_READ_FAILED',
+      error instanceof Error ? error.message : String(error), true);
+  }
   if (!sameBase(state, batch.base)) throw new LidgeAgentError('DOCUMENT_SHA_MISMATCH', '탭 기준 상태가 바뀌었습니다.', true);
   const changedCells: AgentCell[] = [];
   try {

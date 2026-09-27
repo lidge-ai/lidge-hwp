@@ -2,11 +2,12 @@ import http from 'node:http';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROOT, HOST, PORT, DOCS_ROOT, BUILD_DIR } from '../lib/config.mjs';
-import { createDocStore } from '../lib/docstore.mjs';
+import { ROOT, HOST, PORT, DOCS_ROOT, BUILD_DIR, STATE_DIR } from '../lib/config.mjs';
+import { createLibrary } from '../lib/library.mjs';
 import { ensureRepo } from '../lib/git.mjs';
 import { createTabs } from './tabs.mjs';
 import { createDocsApi } from './api-docs.mjs';
+import { pickFolder as defaultPickFolder } from '../lib/folder-picker.mjs';
 import { startAgentSocket as startAgentSocketImpl } from './agent/socket.mjs';
 
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -18,6 +19,10 @@ const json = (res, status, value) => {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(value));
 };
+function requiresOrigin(pathname, method) {
+  return (method === 'POST' && pathname === '/api/roots/pick')
+    || (method === 'DELETE' && pathname.startsWith('/api/roots/'));
+}
 async function readSmallJson(req) {
   const chunks = [];
   let size = 0;
@@ -56,22 +61,27 @@ async function staticFile(res, base, name) {
 }
 
 export async function createServer({ docsRoot = DOCS_ROOT, buildDir = BUILD_DIR,
-    startAgentSocket = startAgentSocketImpl, agentConfig = {} } = {}) {
+    stateDir = STATE_DIR, startAgentSocket = startAgentSocketImpl, agentConfig = {},
+    pickFolder = defaultPickFolder } = {}) {
   await ensureRepo(docsRoot);
-  const store = createDocStore(docsRoot);
+  const store = await createLibrary({ docsRoot, stateDir });
+  if (typeof pickFolder !== 'function') throw new TypeError('pickFolder');
   const tabs = createTabs();
-  const docsApi = createDocsApi({ store, tabs });
+  const docsApi = createDocsApi({ store, tabs, pickFolder });
   const server = http.createServer((req, res) => {
     void (async () => {
       const host = req.headers.host;
       if (!host || !/^(localhost|127\.0\.0\.1):\d+$/.test(host)) {
         json(res, 403, { error: { code: 'BAD_HOST', message: 'BAD_HOST' } }); return;
       }
+      const url = new URL(req.url || '/', `http://${host}`);
+      if (requiresOrigin(url.pathname, req.method) && req.headers.origin !== `http://${host}`) {
+        json(res, 403, { error: { code: 'BAD_ORIGIN', message: 'BAD_ORIGIN' } }); return;
+      }
       if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin
           && req.headers.origin !== `http://${host}`) {
         json(res, 403, { error: { code: 'BAD_ORIGIN', message: 'BAD_ORIGIN' } }); return;
       }
-      const url = new URL(req.url || '/', `http://${host}`);
       if (await docsApi.handle(req, res, url.pathname)) return;
       if (url.pathname.startsWith('/api/agent/saves/') && req.method === 'GET') {
         let requestId;
@@ -115,6 +125,9 @@ export async function createServer({ docsRoot = DOCS_ROOT, buildDir = BUILD_DIR,
           // 들고 편집을 시작하게 된다. 예외는 runner가 만든 예약의 토큰을 가진 따라가기 claim 하나뿐이다(wp5).
           if (store.isLocked(data.docId) && !tabs.reservedFor(data.docId, reservation)) {
             json(res, 423, { error: { code: 'DOCUMENT_LOCKED', message: 'DOCUMENT_LOCKED' } }); return;
+          }
+          if (store.isRootRemoving(data.docId)) {
+            json(res, 423, { error: { code: 'ROOT_BUSY', message: 'ROOT_BUSY' } }); return;
           }
           // 예약 중인 문서는 그 토큰으로 한 번만 claim된다(409 DOC_RESERVED, 만료 토큰은 409 RESERVATION_EXPIRED).
           const lease = tabs.claim(data.docId, reservation);
@@ -171,6 +184,7 @@ export async function createServer({ docsRoot = DOCS_ROOT, buildDir = BUILD_DIR,
   const socket = startAgentSocket ? await startAgentSocket({ store, tabs, config: agentConfig }) : null;
   server.on('close', () => { tabs.close(); socket?.close(); });
   server.store = store; // test-only inspection; production callers use the HTTP/socket boundaries.
+  server.tabs = tabs;
   return server;
 }
 
