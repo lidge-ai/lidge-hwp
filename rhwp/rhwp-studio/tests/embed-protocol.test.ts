@@ -75,9 +75,11 @@ test('embed protocol은 capability를 포함한 v1 connect와 session-bound requ
 });
 
 test('embed router는 binary load와 unknown method를 공개 동작으로 처리한다', async () => {
+  let applyCalls = 0;
   let loaded: Uint8Array | undefined;
   const handlers: EmbedRpcHandlers = {
     ready: async () => true,
+    lidgeApplyOps: async () => { applyCalls += 1; throw new Error('dispatched'); },
     loadFile: async (data) => {
       loaded = data;
       return { pageCount: 2 };
@@ -145,6 +147,12 @@ test('embed router는 binary load와 unknown method를 공개 동작으로 처�
     () => routeEmbedRequest('loadFile', { data: [3, 4], fileName: 'legacy.hwp' }, handlers),
     /binary data/,
   );
+  await assert.rejects(() => routeEmbedRequest('lidge.applyOps', { batch: {}, extra: true }, handlers),
+    (error: unknown) => {
+      const e = error as { code?: string; recovered?: boolean };
+      return e.code === 'INVALID_BATCH' && e.recovered === true;
+    });
+  assert.equal(applyCalls, 0);
 });
 
 test('embed router는 document-agent v1 command와 target을 strict DTO로만 전달한다', async () => {
@@ -639,6 +647,41 @@ test('embed runtime은 client가 협상하지 않은 document-agent method를 di
     cleanup();
     channel.port1.close();
   }
+});
+
+test('lidge.applyOps capability rejection is recovered before dispatch', async () => {
+  let messageListener: (event: MessageEvent) => void = () => {};
+  let applyCalls = 0;
+  const hostWindow = {
+    addEventListener(_type: string, listener: (event: MessageEvent) => void) { messageListener = listener; },
+    removeEventListener() {},
+  };
+  const parentWindow = { postMessage() {} };
+  const cleanup = installEmbedRuntime({ hostWindow: hostWindow as unknown as Window,
+    parentWindow: parentWindow as unknown as Window,
+    handlers: { lidgeApplyOps: async () => { applyCalls += 1; throw new Error('dispatched'); } } as EmbedRpcHandlers });
+  const channel = new MessageChannel();
+  const response = new Promise<unknown>(resolve => {
+    channel.port1.onmessage = ({ data }) => {
+      if (data.type === 'rhwp-connected') channel.port1.postMessage({
+        type: 'rhwp-request', version: 1, sessionId: 'no-lidge-cap',
+        id: 71, method: 'lidge.applyOps', params: { batch: {} },
+      });
+      else resolve(data);
+    };
+    channel.port1.start();
+  });
+  try {
+    messageListener({ data: { type: 'rhwp-connect', version: 1, sessionId: 'no-lidge-cap',
+      capabilities: ['transferable-array-buffer'] }, source: parentWindow,
+      origin: 'https://host.example', ports: [channel.port2] } as unknown as MessageEvent);
+    assert.deepEqual(await response, {
+      type: 'rhwp-response', version: 1, sessionId: 'no-lidge-cap', id: 71,
+      error: { code: 'UNSUPPORTED_CAPABILITY',
+        message: 'lidge-host-v1 was not negotiated by the client.', recovered: true },
+    });
+    assert.equal(applyCalls, 0);
+  } finally { cleanup(); channel.port1.close(); }
 });
 
 test('embed legacy transport는 document mutation method를 dispatch하지 않는다', async () => {
