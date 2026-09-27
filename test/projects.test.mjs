@@ -115,6 +115,10 @@ test('external ids group by UUID and unavailable roots retain label, path, and r
     assert.deepEqual(headers.map(h => h.dataset.reason), ['MISSING', 'REPLACED']);
     assert.match(headers[0].getAttribute('aria-label'), /찾을 수 없음.*추가한 폴더/);
     assert.match(headers[1].getAttribute('aria-label'), /다른 폴더로 바뀜.*추가한 폴더/);
+    const docButton = nodes.find(n => n.className === 'doc');
+    assert.equal(docButton.dataset.id, `ext://${key}/a.hwpx`);
+    assert.equal(docButton.title, '자료/a.hwpx', 'tooltip hides the internal ext:// id');
+    assert.equal(docButton.getAttribute('aria-label'), '자료/a.hwpx');
     assert.equal(imports, 0);
   } finally { delete globalThis.document; }
 });

@@ -60,11 +60,19 @@ test('pick registers a selected folder, survives restart, and only unregisters f
 });
 
 test('pick cancellation, failure, timeout, and single-flight leave registry unchanged', async t => {
+  // 선택기가 불리지 않는 회귀에서 무한 대기하지 않도록 기한을 둔다.
+  const waitFor = async (condition, what, ms = 5000) => {
+    const end = Date.now() + ms;
+    while (!condition()) {
+      if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+  };
   let release, calls = 0;
   const f = await fixture(t, () => { calls++; return new Promise(resolve => { release = resolve; }); });
   const { base } = await f.start();
   const first = mutate(base, '/api/roots/pick', 'POST');
-  while (!release) await new Promise(resolve => setImmediate(resolve));
+  await waitFor(() => release, 'first picker call');
   const collision = await mutate(base, '/api/roots/pick', 'POST');
   assert.equal(collision.status, 409);
   assert.equal((await collision.json()).error.code, 'PICK_IN_PROGRESS');
@@ -73,7 +81,7 @@ test('pick cancellation, failure, timeout, and single-flight leave registry unch
   const cancelled = await first;
   assert.equal(cancelled.status, 204); assert.equal(await cancelled.text(), '');
   const again = mutate(base, '/api/roots/pick', 'POST');
-  while (calls < 2) await new Promise(resolve => setImmediate(resolve));
+  await waitFor(() => calls >= 2, 'second picker call');
   release(null);
   assert.equal((await again).status, 204);
   assert.deepEqual((await (await fetch(base + '/api/docs')).json()).roots, []);

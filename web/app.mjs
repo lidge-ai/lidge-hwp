@@ -173,7 +173,7 @@ async function save() {
     }, body: exported.bytes });
     const result = await response.json();
     tab.etag = `"${result.sha256}"`;
-    say(`커밋 ${result.commit} · ${tab.id}`);
+    say(`커밋 ${result.commit} · ${nameOf(tab.id)}`);
     try { await studio.notifySaved(tab.id.split('/').at(-1)); }
     catch (error) { say(`파일 커밋 ${result.commit} 완료, 편집기 상태 갱신 실패: ${error.message}`); }
   } catch (error) { say(`저장 실패: ${error.message}`); }

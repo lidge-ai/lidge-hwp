@@ -156,9 +156,11 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
       button.type = 'button';
       button.className = 'doc';
       button.dataset.id = doc.id;
-      button.title = doc.id;
       // 스크린리더·자동화가 문서를 전체 경로로 구별하게 한다(형식 배지는 읽지 않음).
-      button.setAttribute('aria-label', doc.id);
+      // 외부 문서는 내부 id(ext://<UUID>/...) 대신 "폴더 이름/경로"를 쓴다. 식별은 data-id가 맡는다.
+      const shown = group.kind === 'external' ? `${group.label}/${doc.name}` : doc.id;
+      button.title = shown;
+      button.setAttribute('aria-label', shown);
       button.setAttribute('aria-current', String(doc.id === currentId));
       const name = document.createElement('span');
       name.className = 'doc-name';
