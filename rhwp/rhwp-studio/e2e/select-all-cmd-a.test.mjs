@@ -166,6 +166,40 @@ await runTest('⌘A 전체 선택 — 셀/글상자 범위 + 표 하이라이트
     assert(await cellText(page, doc, 1, 1) === 'B2', 'b: 편집 뒤 undo가 B2 원문을 복원');
   }
 
+  // ── (b2) 셀의 부분 선택 뒤 ⌘A → 기존 anchor 대신 셀 처음부터 ──
+  {
+    setTestCase('b2-cell-partial-selection');
+    const doc = await buildDoc(page);
+    await caretInCell(page, doc, 1, 1); // B2의 offset 1
+    await key(page, { key: 'ArrowLeft', shift: true });
+    const partial = await selState(page);
+    assert(partial.hasSel && partial.start.charOffset === 0 && partial.end.charOffset === 1,
+      `b2: 부분 선택 사전 조건 (실제 ${JSON.stringify(partial)})`);
+    await key(page, { key: 'a', code: 'KeyA', meta: true });
+    const s = await selState(page);
+    assert(s.start.parentParaIndex === doc.paraIdx && s.end.parentParaIndex === doc.paraIdx,
+      'b2: 선택 범위는 B2 셀 내부');
+    assert(s.start.cellParaIndex === 0 && s.start.charOffset === 0
+      && s.end.cellParaIndex === 0 && s.end.charOffset === 2,
+    `b2: 기존 anchor 대신 B2 전체 선택 (실제 ${JSON.stringify(s)})`);
+  }
+
+  // ── (a2) 본문 부분 선택 뒤 ⌘A → 문서 첫 위치부터 ──
+  {
+    setTestCase('a2-body-partial-selection');
+    await buildDoc(page);
+    await caretInBody(page); // BEFORE의 offset 2
+    await key(page, { key: 'ArrowRight', shift: true });
+    const partial = await selState(page);
+    assert(partial.hasSel && partial.start.charOffset === 2 && partial.end.charOffset === 3,
+      `a2: 본문 부분 선택 사전 조건 (실제 ${JSON.stringify(partial)})`);
+    await key(page, { key: 'a', code: 'KeyA', meta: true });
+    const s = await selState(page);
+    assert(s.hasSel && s.start.sectionIndex === 0 && s.start.paragraphIndex === 0
+      && s.start.charOffset === 0 && s.start.parentParaIndex === undefined,
+    `a2: 기존 anchor 대신 문서 첫 위치부터 선택 (실제 ${JSON.stringify(s)})`);
+  }
+
   // ── (c) 여러 문단 셀 → 첫 문단 시작부터 마지막 문단 끝까지 ──
   {
     setTestCase('c-multi-paragraph-cell');
@@ -192,6 +226,25 @@ await runTest('⌘A 전체 선택 — 셀/글상자 범위 + 표 하이라이트
       `c: 마지막 문단 끝 (실제 ${JSON.stringify(s.end)})`);
     assert(await cellText(page, doc, 1, 1, 0) === 'B2', 'c: 첫 문단 원문');
     assert(await cellText(page, doc, 1, 1, 1) === 'SECOND', 'c: 둘째 문단 원문');
+    await key(page, { key: 'Backspace' });
+    await page.evaluate(settle);
+    const edited = await page.evaluate(({ paraIdx, controlIdx }) => {
+      const w = window.__wasm;
+      const b = (w.getTableCellBboxes(0, paraIdx, controlIdx, 0) || [])
+        .find(x => x.row === 1 && x.col === 1);
+      return {
+        count: w.getCellParagraphCount(0, paraIdx, controlIdx, b.cellIdx),
+        first: w.getTextInCell(0, paraIdx, controlIdx, b.cellIdx, 0, 0, 100),
+      };
+    }, doc);
+    assert(edited.count === 1 && edited.first === '',
+      `c: B2와 SECOND가 삭제되고 빈 문단 하나만 남음 (실제 ${JSON.stringify(edited)})`);
+    assert(await cellText(page, doc, 0, 0) === 'A1', 'c: 다른 셀 보존');
+    assert(await cellText(page, doc, 2, 2) === 'C3', 'c: 다른 셀 보존');
+    await key(page, { key: 'z', code: 'KeyZ', meta: true });
+    await page.evaluate(settle);
+    assert(await cellText(page, doc, 1, 1, 0) === 'B2', 'c: undo가 첫 문단 B2 복원');
+    assert(await cellText(page, doc, 1, 1, 1) === 'SECOND', 'c: undo가 둘째 문단 SECOND 복원');
   }
 
   // ── (n) 런타임 HTML 붙여넣기로 만든 중첩 표의 안쪽 셀만 선택 ──
@@ -261,6 +314,11 @@ await runTest('⌘A 전체 선택 — 셀/글상자 범위 + 표 하이라이트
   {
     setTestCase('h-textbox');
     await resetModes(page);
+    // loadHwpFile는 제품의 문서 전환 수명주기를 거치지 않으므로 이전 문서의 undo를 비운다.
+    await page.evaluate(() => {
+      const ih = window.__inputHandler;
+      ih.history.clear(ih.wasm);
+    });
     await loadHwpFile(page, 'hml/formatting_table.hml');
     const box = await page.evaluate(() => {
       const w = window.__wasm;
@@ -271,6 +329,10 @@ await runTest('⌘A 전체 선택 — 셀/글상자 범위 + 표 하이라이트
       const text = w.getTextInCell(0, paraIdx, controlIdx, 0, 0, 0, 100);
       if (text !== 'textbox') throw new Error(`샘플 글상자 내용 불일치: ${text}`);
       return { paraIdx, controlIdx, text };
+    });
+    const bodyBefore = await page.evaluate(() => {
+      const w = window.__wasm;
+      return Array.from({ length: w.getParagraphCount(0) }, (_, p) => w.getTextRange(0, p, 0, 1000));
     });
     await page.evaluate(({ paraIdx, controlIdx }) => {
       const ih = window.__inputHandler;
@@ -292,6 +354,22 @@ await runTest('⌘A 전체 선택 — 셀/글상자 범위 + 표 하이라이트
     assert(s.start.charOffset === 0 && s.end.charOffset === box.text.length,
       `h: 글상자 텍스트 전체 범위 (실제 ${JSON.stringify(s)})`);
     assert(s.start.cellIndex === 0 && s.end.cellIndex === 0, 'h: 선택은 샘플 글상자 내부');
+    await key(page, { key: 'Backspace' });
+    await page.evaluate(settle);
+    const after = await page.evaluate(({ paraIdx, controlIdx }) => {
+      const w = window.__wasm;
+      return {
+        text: w.getTextInCell(0, paraIdx, controlIdx, 0, 0, 0, 100),
+        body: Array.from({ length: w.getParagraphCount(0) }, (_, p) => w.getTextRange(0, p, 0, 1000)),
+      };
+    }, box);
+    assert(after.text === '', `h: 글상자 텍스트 삭제 (실제 ${after.text})`);
+    assert(JSON.stringify(after.body) === JSON.stringify(bodyBefore), 'h: 본문 보존');
+    await key(page, { key: 'z', code: 'KeyZ', meta: true });
+    await page.evaluate(settle);
+    assert(await page.evaluate(({ paraIdx, controlIdx }) =>
+      window.__wasm.getTextInCell(0, paraIdx, controlIdx, 0, 0, 0, 100), box) === box.text,
+    'h: undo가 글상자 원문 복원');
   }
 
   // ── (d) 셀 블록(F5) → 블록 해제 + 현재 셀 선택 ──

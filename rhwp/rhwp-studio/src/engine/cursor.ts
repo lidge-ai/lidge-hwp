@@ -1315,6 +1315,9 @@ export class CursorState {
         charOffset,
         cellPath: pathAtCpi(cpi),
       });
+      // setAnchor()는 기존 anchor를 유지하므로, 부분 선택 상태에서 ⌘A를 눌러도
+      // 범위가 셀 시작부터 잡히도록 먼저 선택을 비운다.
+      this.clearSelection();
       this.moveTo(atCpi(0, 0));
       this.setAnchor();
       this.moveTo(atCpi(lastCpi, lastLen));

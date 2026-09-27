@@ -1783,6 +1783,8 @@ export function handleSelectAll(this: any): void {
   }
 
   // anchor를 문서 시작, focus를 문서 끝으로 설정
+  // (기존 부분 선택의 anchor가 남지 않도록 먼저 비운다)
+  this.cursor.clearSelection();
   this.cursor.moveTo({ sectionIndex: 0, paragraphIndex: 0, charOffset: 0 });
   this.cursor.setAnchor();
   this.cursor.moveToDocumentEnd();
