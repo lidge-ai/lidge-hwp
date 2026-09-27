@@ -91,16 +91,52 @@ export function writeCollapsedGroups(collapsed, storage = globalThis.localStorag
 // query가 있으면 일치하는 그룹만 펼친 채로 보여 주고 접힘 저장소는 건드리지 않는다.
 export function renderProjects(listEl, groups, { currentId = null, collapsed = new Set(),
     query = '', onOpen = () => {}, onToggle = () => {}, groupActions = null, onImport = null,
-    onRename = () => {},
+    onRename = () => {}, edit = null, onEditInput = () => {}, onEditKey = () => {},
+    onEditBlur = () => {}, showEmpty = true,
     emptyLabel = '문서함에 HWP/HWPX가 없습니다.' } = {}) {
   listEl.textContent = '';
   let shown = 0;
   const filtering = matchDoc({ id: '' }, query) === false;
-  for (const group of groups) {
+  const visibleGroups = edit?.kind === 'new' && edit.groupKey === '' && !groups.some(g => g.key === '')
+    ? [...groups, { key: '', label: ROOT_LABEL, kind: 'primary', docs: [] }] : groups;
+  const appendEdit = (body, editState, badgeText) => {
+    const row = document.createElement('li');
+    row.className = `doc-row ${editState.kind === 'new' ? 'new-doc-row' : 'renaming'}`;
+    row.dataset.edit = 'true';
+    if (editState.id) row.dataset.id = editState.id;
+    if (editState.pending) row.setAttribute('aria-busy', 'true');
+    const slot = document.createElement('div'); slot.className = 'doc-edit';
+    const wrap = document.createElement('span'); wrap.className = 'edit-name';
+    const input = document.createElement('input');
+    input.type = 'text'; input.className = editState.kind === 'new' ? 'new-doc-input' : 'rename-input';
+    input.value = editState.draft;
+    input.readOnly = !!editState.pending;
+    input.setAttribute('aria-label', editState.kind === 'new' ? '새 문서 이름' : `${editState.label} 새 이름`);
+    if (editState.error) { input.setAttribute('aria-invalid', 'true'); input.setAttribute('aria-describedby', 'doc-name-error'); }
+    input.addEventListener('input', () => onEditInput(input));
+    input.addEventListener('keydown', event => onEditKey(event, input));
+    input.addEventListener('blur', event => onEditBlur(event, input));
+    input.addEventListener('compositionstart', () => { editState.composing = true; editState.imeJustEnded = false; });
+    input.addEventListener('compositionend', () => { editState.composing = false; editState.imeJustEnded = true;
+      input.addEventListener('keyup', () => { editState.imeJustEnded = false; }, { once: true }); });
+    wrap.append(input);
+    const suffix = document.createElement('span'); suffix.className = 'doc-extension'; suffix.textContent = editState.extension;
+    wrap.append(suffix); slot.append(wrap);
+    const badge = document.createElement('span'); badge.className = 'badge'; badge.setAttribute('aria-hidden', 'true');
+    badge.textContent = badgeText; slot.append(badge); row.append(slot);
+    if (editState.error) {
+      const message = document.createElement('div'); message.id = 'doc-name-error';
+      message.className = 'name-error'; message.setAttribute('role', 'alert'); message.textContent = editState.error;
+      row.append(message);
+    }
+    body.append(row);
+  };
+  for (const group of visibleGroups) {
     const docs = group.docs.filter((doc) => matchDoc(doc, query));
-    if (filtering && docs.length === 0) continue;
+    const newHere = edit?.kind === 'new' && edit.groupKey === group.key;
+    if (filtering && docs.length === 0 && !newHere) continue;
     const expanded = filtering || !collapsed.has(group.key);
-    shown += docs.length;
+    shown += docs.length + Number(newHere);
     const item = document.createElement('li');
     item.className = 'group';
     const row = document.createElement('div');
@@ -120,15 +156,20 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
     header.append(folder());
     const label = document.createElement('span');
     label.className = 'group-label';
-    const reasonLabel = group.reason === 'MISSING' ? ' (찾을 수 없음)'
-      : group.reason === 'REPLACED' ? ' (다른 폴더로 바뀜)' : '';
-    label.textContent = group.label + (group.available === false ? reasonLabel : '');
+    const reasonLabel = group.reason === 'MISSING' ? '찾을 수 없음'
+      : group.reason === 'REPLACED' ? '다른 폴더로 바뀜' : '접근 불가';
+    label.textContent = group.label;
     const count = document.createElement('span');
     count.className = 'count';
     count.setAttribute('aria-hidden', 'true');
     count.textContent = String(group.docs.length);
-    header.append(label, count);
-    header.setAttribute('aria-label', `${group.label}${group.available === false ? reasonLabel : ''} ${group.kind === 'external' ? '추가한 폴더' : '프로젝트'}, 문서 ${group.docs.length}개`);
+    header.append(label);
+    if (group.available === false) {
+      const reason = document.createElement('span'); reason.className = 'group-reason'; reason.textContent = reasonLabel;
+      header.append(reason);
+    }
+    header.append(count);
+    header.setAttribute('aria-label', `${group.label}${group.available === false ? ` (${reasonLabel})` : ''} ${group.kind === 'external' ? '추가한 폴더' : '프로젝트'}, 문서 ${group.docs.length}개`);
     header.addEventListener('click', () => onToggle(group.key, !expanded));
     row.append(header);
     if (groupActions) {
@@ -160,7 +201,9 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
     body.id = bodyId;
     body.className = 'group-docs';
     body.hidden = !expanded;
+    if (newHere) appendEdit(body, edit, 'HWP');
     for (const doc of docs) {
+      if (edit?.kind === 'rename' && edit.id === doc.id) { appendEdit(body, edit, doc.format.toUpperCase()); continue; }
       const row = document.createElement('li');
       row.className = 'doc-row';
       const button = document.createElement('button');
@@ -189,15 +232,21 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
       rename.textContent = '이름';
       rename.title = `${shown} 이름 바꾸기 (F2, ⌘⇧R)`;
       rename.setAttribute('aria-label', `${shown} 이름 바꾸기`);
+      rename.setAttribute('aria-keyshortcuts', 'F2 Meta+Shift+R');
       rename.addEventListener('click', () => onRename(doc.id));
       row.append(rename);
       row.addEventListener('contextmenu', event => { event.preventDefault(); onRename(doc.id); });
       body.append(row);
     }
     item.append(body);
+    if (group.available === false) {
+      const unavailable = document.createElement('p'); unavailable.className = 'group-unavailable';
+      unavailable.textContent = '폴더에 접근할 수 없습니다 · 경로 확인 또는 등록 해제';
+      item.append(unavailable);
+    }
     listEl.append(item);
   }
-  if (shown === 0) {
+  if (shown === 0 && showEmpty && emptyLabel) {
     const empty = document.createElement('li');
     empty.className = 'empty';
     empty.textContent = filtering ? '일치하는 문서가 없습니다' : emptyLabel;

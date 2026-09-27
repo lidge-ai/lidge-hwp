@@ -154,15 +154,23 @@ async function main() {
     assert.equal(await focusEditor(), true);
     const beforeNew = (await state()).posts;
     await key('n', 'KeyN', 5, 78);
+    await until(() => cdp.eval(`return !!document.querySelector('.new-doc-row input');`));
+    assert.equal((await state()).posts, beforeNew);
+    await cdp.eval(`document.querySelector('.new-doc-row input').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));`);
     await until(async () => (await state()).posts === beforeNew + 1);
     await until(async () => (await state()).id === '새 문서.hwp');
-    assert.match((await state()).status, /^새 문서 .* · 커밋 [0-9a-f]{7}$/);
+    assert.equal((await state()).status, '새 문서 열림');
     assert.equal((await state()).posts, beforeNew + 1);
     console.log('PASS iframe Option-Command-N creates one new HWP');
 
     assert.equal(await focusEditor(), true);
     const beforeCommandNew = (await state()).posts;
     await key('n', 'KeyN', 4, 78);
+    await until(() => cdp.eval(`return !!document.querySelector('.new-doc-row input');`));
+    assert.equal((await state()).posts, beforeCommandNew);
+    await cdp.eval(`document.querySelector('.new-doc-row input').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));`);
     await until(async () => (await state()).posts === beforeCommandNew + 1);
     await until(async () => (await state()).id === '새 문서 2.hwp');
     assert.equal((await state()).posts, beforeCommandNew + 1);
@@ -213,7 +221,7 @@ async function main() {
     await cdp.send('Input.insertText', { text: 'x' });
     await key('s', 'KeyS', 4, 83);
     await until(async () => (await state()).puts === beforeSave + 1);
-    await until(async () => /^커밋 [0-9a-f]{40} · /.test((await state()).status));
+    await until(async () => (await state()).status === '저장됨');
     console.log('PASS iframe Command-S saves once');
 
     assert.equal(await focusEditor(), true);
@@ -221,7 +229,7 @@ async function main() {
     await cdp.send('Input.insertText', { text: 'y' });
     await key('s', 'KeyS', 2, 83);
     await until(async () => (await state()).puts === beforeCtrlSave + 1);
-    await until(async () => /^커밋 [0-9a-f]{40} · /.test((await state()).status));
+    await until(async () => (await state()).status === '저장됨');
     console.log('PASS iframe Ctrl-S saves once');
 
     await cdp.eval(`const button = ${frame}.document.querySelector('[data-cmd="insert:bookmark"]'); button.click();`);

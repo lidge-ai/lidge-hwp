@@ -1,10 +1,10 @@
-import { createStudio } from '/editor/index.js';
 import { startAgentChannel } from '/agent-channel.mjs';
 import { followSwitch } from '/follow-switch.mjs';
 import { copyPath } from '/copy-path.mjs';
 import { shellShortcutDecision } from '/shell-shortcuts.mjs';
 import { dispatchHostEvent } from '/host-shortcuts.mjs';
 import { initSidebar } from '/sidebar.mjs';
+import { normalizeNewDocName } from '/doc-name.mjs';
 import { groupDocs, groupKeyOf, createGroupFor, matchDoc, renderProjects, readCollapsedGroups, writeCollapsedGroups, bindListKeys, displayName } from '/projects.mjs';
 
 initSidebar();
@@ -21,7 +21,32 @@ const filename = document.querySelector('#filename');
 const saveButton = document.querySelector('#save');
 const newButton = document.querySelector('#new-doc');
 const copyPathButton = document.querySelector('#copy-path');
+const shellMessage = document.querySelector('#shell-message');
+const shellRetry = document.querySelector('#shell-retry');
+const shellReload = document.querySelector('#shell-reload');
+const shellHint = document.querySelector('#shell-hint');
 let studio;
+let resolveStudioReady;
+const studioReady = new Promise(resolve => { resolveStudioReady = resolve; });
+let shellState = { kind: 'empty' };
+function setShellState(state) {
+  shellState = state;
+  document.body.dataset.shellState = state.kind;
+  document.body.dataset.noDocument = state.kind === 'open' ? '' : 'true';
+  if (state.kind === 'open') delete document.body.dataset.noDocument;
+  if (studio) studio.element.inert = state.kind !== 'open';
+  shellMessage.textContent = state.reason === 'STUDIO_FAILED' ? '편집기를 시작하지 못했습니다'
+    : state.kind === 'opening' ? '문서를 여는 중…'
+    : state.kind === 'error' ? `${nameOf(state.attemptedId)} 문서를 열지 못했습니다`
+    : '목록에서 문서를 선택하세요';
+  shellRetry.hidden = !(state.kind === 'error' && state.attemptedId && state.reason !== 'STUDIO_FAILED');
+  shellRetry.disabled = state.kind === 'opening';
+  shellReload.hidden = state.reason !== 'STUDIO_FAILED';
+  shellHint.hidden = state.kind !== 'error' || state.reason === 'STUDIO_FAILED';
+}
+shellRetry.addEventListener('click', () => { if (shellState.attemptedId) void openDoc(shellState.attemptedId); });
+shellReload.addEventListener('click', () => location.reload());
+setShellState(shellState);
 let current = null;
 let saving = false;
 let agentLocked = false;
@@ -30,7 +55,10 @@ let openQueue = Promise.resolve(); // 사람 클릭과 AI 전환(agent.follow)�
 const setSaveLocked = on => { agentLocked = on; saveButton.disabled = on || saving || !current; };
 function syncCopyPathButton() { copyPathButton.disabled = !current; }
 
-function say(message) { status.textContent = message; status.title = message; } // 한 줄로 잘려도 전체는 title로
+function say(message, kind = /실패|오류|끊겼|확인 불가|격리/.test(message) ? 'error' : 'normal') {
+  status.textContent = message; status.title = message;
+  document.querySelector('header').dataset.statusKind = kind;
+}
 
 async function api(url, options) {
   const response = await fetch(url, options);
@@ -69,6 +97,10 @@ function openDocNow(id, { reservation = null, agent = false } = {}) {
 // 문서 하나로 바꾼다. 새 문서가 열렸으면 true. AI 전환(agent)은 멈출 이유를 던지고(followSwitch가 정리),
 // 사람 전환은 상태줄에 알리고 false를 돌려준다.
 async function switchTo(id, { reservation = null, agent = false, rethrow = false } = {}) {
+  if (!studio && !(await studioReady)) {
+    setShellState({ kind: 'error', reason: 'STUDIO_FAILED' });
+    return false;
+  }
   if (saving) { if (agent) throw new Error('SAVING'); return false; }
   if (current?.id === id) { if (agent) throw new Error('ALREADY_OPEN'); return false; }
   if (current && (await studio.getDocumentState()).dirty) {
@@ -77,12 +109,14 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
   }
   let next;
   const previous = current;
+  setShellState({ kind: 'opening', attemptedId: id });
   if (previous) {
     // 이전 문서를 먼저 정리한다. release()가 stopAgent()를 await하며,
     // AGENT_BUSY·LEASE_ISOLATED면 던지고 전환을 중단한다(선택 표시는 그대로 이전 문서).
     try { await release(previous); }
     catch (error) {
       if (agent) throw error; // followSwitch가 inert를 전환 전 값(격리 탭이면 true)으로 되돌린다
+      setShellState({ kind: 'open' });
       say(`전환 취소: ${error.message}`);
       return false;
     }
@@ -143,8 +177,7 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
     });
     current = next;
     syncCopyPathButton();
-    delete document.body.dataset.noDocument;
-    studio.element.inert = false;
+    setShellState({ kind: 'open' });
     filename.textContent = nameOf(id); filename.title = id;
     saveButton.disabled = agentLocked;
     for (const button of document.querySelectorAll('#docs button[data-id], #external-docs button[data-id]')) button.setAttribute('aria-current', String(button.dataset.id === id));
@@ -155,7 +188,7 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
     activeButton?.scrollIntoView({ block: 'nearest' });
     if (openHadListFocus) activeButton?.focus();
     openHadListFocus = false;
-    say(agent ? `${nameOf(id)} 열림 · AI 편집을 기다리는 중` : `${nameOf(id)} 열림`);
+    say(agent ? '열림 · AI 편집 대기 중' : '열림');
     return true;
   } catch (error) {
     // AI 전환이면 runner가 FOLLOW_LOAD_FAILED로 알아채고, followSwitch가 예약을 돌려준다.
@@ -166,15 +199,14 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
       filename.textContent = ''; filename.title = '';
       saveButton.disabled = true;
       for (const button of document.querySelectorAll('#docs button[data-id], #external-docs button[data-id]')) button.setAttribute('aria-current', 'false');
-      document.body.dataset.noDocument = 'true'; // CSS: [data-no-document] #studio { pointer-events:none; opacity:.35 } + 안내 오버레이
-      studio.element.inert = true; // 포커스·키보드 입력까지 막는다(iframe은 pointer-events만으로 키 입력이 막히지 않음)
+      setShellState({ kind: 'error', attemptedId: id, reason: error.message });
       studio.element.blur?.();
     }
     // AI 전환은 알림을 followSwitch 한 곳이 맡는다(중복 알림·구체 사유 덮어쓰기 방지). 화면 정리만 하고 던진다.
     if (agent || rethrow) throw error;
     say(error.message === 'DOCUMENT_LOCKED'
-      ? `${nameOf(id)}는 AI가 편집 중입니다 · 끝난 뒤 목록에서 다시 여세요`
-      : `열기 실패: ${error.message} · 목록에서 문서를 다시 선택하세요`);
+      ? 'AI가 편집 중입니다 · 잠시 뒤 다시 여세요'
+      : '문서를 열지 못했습니다 · 다시 열어 보세요');
     return false;
   }
 }
@@ -196,7 +228,7 @@ async function save() {
     }, body: exported.bytes });
     const result = await response.json();
     tab.etag = `"${result.sha256}"`;
-    say(`커밋 ${result.commit} · ${nameOf(tab.id)}`);
+    say('저장됨');
     try { await studio.notifySaved(tab.id.split('/').at(-1)); }
     catch (error) { say(`파일 커밋 ${result.commit} 완료, 편집기 상태 갱신 실패: ${error.message}`); }
   } catch (error) { say(`저장 실패: ${error.message}`); }
@@ -208,6 +240,10 @@ let groups = [];
 let externalGroups = [];
 let selectedGroupKey = null;
 let creating = false;
+let editing = null;
+let rendering = false;
+let pendingCancel = false;
+let searchTimer;
 for (const docList of [list, externalList]) docList.addEventListener('focusin', (event) => {
   const group = event.target?.closest?.('.group');
   if (group) selectedGroupKey = group.querySelector('.group-header')?.dataset.group ?? null;
@@ -226,12 +262,28 @@ function renderDocs() {
   // 목록을 다시 그리면 노드가 교체되어 포커스가 날아간다. 포커스가 목록 안에 있었으면
   // 같은 문서 버튼·그룹 헤더로 복원하고, 없어졌으면 활성 문서 버튼으로 보낸다.
   const active = document.activeElement;
+  if (editing && active?.matches?.('.doc-edit input')) {
+    editing.draft = active.value;
+    editing.selection = [active.selectionStart, active.selectionEnd];
+  }
   const activeList = list.contains(active) ? list : externalList.contains(active) ? externalList : null;
   const selector = active?.dataset?.id ? `button[data-id="${CSS.escape(active.dataset.id)}"]`
     : active?.classList?.contains('group-header') ? `.group-header[data-group="${CSS.escape(active.dataset.group)}"]`
     : null;
+  rendering = true;
+  const query = docFilter.value.trim();
+  const total = [...groups, ...externalGroups].reduce((n, group) => n + group.docs.filter(doc => matchDoc(doc, query)).length, 0);
+  const noResults = !!query && total === 0 && !editing;
+  const editOptions = { edit: editing, onEditInput: input => {
+    if (!editing) return;
+    editing.draft = input.value;
+    editing.touched = true;
+    if (editing.error) { editing.error = null; input.removeAttribute('aria-invalid');
+      input.closest('.doc-row')?.querySelector('.name-error')?.remove(); }
+  }, onEditKey: editKey, onEditBlur: editBlur };
   renderProjects(list, groups, {
     currentId: current?.id ?? null, collapsed: collapsedGroups, query: docFilter.value,
+    ...editOptions, showEmpty: !query,
     onRename: id => { void beginRename(id); },
     onOpen: (id) => { openHadListFocus = list.contains(document.activeElement); void openDoc(id); },
     onToggle: (key, expanded) => {
@@ -255,8 +307,10 @@ function renderDocs() {
   });
   renderProjects(externalList, externalGroups, {
     currentId: current?.id ?? null, collapsed: collapsedGroups, query: docFilter.value,
+    ...editOptions, showEmpty: !query,
     onRename: id => { void beginRename(id); },
-    emptyLabel: externalGroups.length === 0 ? '추가한 폴더가 없습니다.' : '추가한 폴더에 HWP/HWPX가 없습니다.',
+    emptyLabel: externalGroups.length === 0 ? '추가한 폴더가 없습니다.'
+      : externalGroups.every(group => group.available === false) ? '' : '추가한 폴더에 HWP/HWPX가 없습니다.',
     onOpen: id => { openHadListFocus = externalList.contains(document.activeElement); void openDoc(id); },
     onToggle: (key, expanded) => {
       if (expanded) collapsedGroups.delete(key); else collapsedGroups.add(key);
@@ -272,63 +326,107 @@ function renderDocs() {
       return button;
     },
   });
-  if (activeList) {
+  document.querySelector('#search-feedback').replaceChildren();
+  if (noResults) {
+    const feedback = document.querySelector('#search-feedback');
+    feedback.append('일치하는 문서가 없습니다 · ');
+    const clear = document.createElement('button'); clear.type = 'button'; clear.textContent = '검색어 지우기';
+    clear.addEventListener('click', () => { docFilter.value = ''; renderDocs(); docFilter.focus(); announceSearch(); });
+    feedback.append(clear);
+  }
+  rendering = false;
+  if (editing) {
+    const input = document.querySelector('.doc-edit input');
+    if (input && active?.matches?.('.doc-edit input')) {
+      input.focus();
+      if (editing.selection) input.setSelectionRange(...editing.selection);
+    }
+  }
+  if (activeList && !editing) {
     (selector && activeList.querySelector(selector)
       || document.querySelector('#docs button[aria-current="true"], #external-docs button[aria-current="true"]'))?.focus();
   }
 }
 async function loadDocs() {
-  const response = await api('/api/docs');
-  const { docs, projects = [], roots = [] } = await response.json();
-  ({ primary: groups, external: externalGroups } = groupDocs(docs, projects, roots));
-  renderDocs();
-  say(docs.length === 0 ? '문서함에 HWP/HWPX가 없습니다.' : '문서를 선택하세요.');
+  const feedback = document.querySelector('#list-feedback');
+  feedback.textContent = '문서 목록을 불러오는 중…';
+  try {
+    const response = await api('/api/docs');
+    const { docs, projects = [], roots = [] } = await response.json();
+    ({ primary: groups, external: externalGroups } = groupDocs(docs, projects, roots));
+    renderDocs();
+    feedback.textContent = '';
+    if (!current) say(docs.length === 0 ? '문서함에 HWP/HWPX가 없습니다.' : '');
+  } catch (error) {
+    feedback.textContent = '문서 목록을 불러오지 못했습니다 · ';
+    const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = '다시 시도';
+    retry.addEventListener('click', () => { void loadDocs(); }); feedback.append(retry);
+    say('문서 목록을 불러오지 못했습니다', 'error');
+    throw error;
+  }
+}
+function announceSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    const query = docFilter.value.trim();
+    if (!query) { say('검색어를 지웠습니다'); return; }
+    const count = [...groups, ...externalGroups].reduce((n, group) => n + group.docs.filter(doc => matchDoc(doc, query)).length, 0);
+    say(count ? `검색 결과 ${count}개` : '일치하는 문서가 없습니다');
+  }, 300);
 }
 
-async function newDocument(name) {
+async function newDocument(name, group) {
   if (creating) return { ok: false, created: null };
   creating = true;
+  const requestId = crypto.randomUUID();
   try {
     let response;
     try {
       response = await api('/api/docs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ group: createGroupFor([...groups, ...externalGroups], selectedGroupKey, current?.id),
-          ...(name ? { name } : {}) }) });
+        body: JSON.stringify({ group, requestId, ...(name !== undefined ? { name } : {}) }) });
     } catch (error) {
       if (error instanceof TypeError) {
-        selectedGroupKey = null;
-        try { await loadDocs(); } catch { /* outcome is unknown */ }
-        selectedGroupKey = null;
-        say('새 문서 결과 확인 불가 · 목록을 확인하세요');
-        return { ok: true, created: null };
+        return settleUnknown(requestId);
       }
-      say(`새 문서 실패: ${error.message}`);
+      showEditError(error.message);
       return { ok: false, created: null };
     }
-    selectedGroupKey = null;
     let created;
     try { created = await response.json(); }
-    catch {
-      try { await loadDocs(); } catch { /* outcome is unknown */ }
-      selectedGroupKey = null;
-      say('새 문서 결과 확인 불가 · 목록을 확인하세요');
-      return { ok: true, created: null };
-    }
-    try {
-      await loadDocs();
-      const opened = await openDoc(created.id);
-      say(opened ? `새 문서 ${nameOf(created.id)} · 커밋 ${created.commit.slice(0, 7)}`
-        : `새 문서 ${nameOf(created.id)} 만들었음 · 목록에서 열 수 있습니다`);
-    } catch (error) {
-      say(`새 문서 ${nameOf(created.id)} 만들었음 · 목록 갱신/열기 실패: ${error.message}`);
-    }
-    selectedGroupKey = null;
-    return { ok: true, created };
+    catch { return settleUnknown(requestId); }
+    return completeCreated(created);
   } finally { creating = false; }
+}
+async function settleUnknown(requestId) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt) await new Promise(resolve => setTimeout(resolve, 300));
+    try {
+      const response = await fetch(`/api/docs/requests/${encodeURIComponent(requestId)}`);
+      if (response.status === 200) return completeCreated(await response.json());
+      if (response.status === 404) break;
+      if (response.status !== 202) break;
+    } catch { break; }
+  }
+  editing = null; renderDocs();
+  say('새 문서 결과 확인 불가 · 목록을 확인하세요', 'error');
+  return { ok: true, created: null };
+}
+async function completeCreated(created) {
+  editing = null;
+  selectedGroupKey = null;
+  renderDocs();
+  try {
+    await loadDocs();
+    const opened = await openDoc(created.id);
+    say(opened ? '새 문서 열림' : '새 문서를 만들었습니다 · 목록에서 다시 여세요');
+  } catch (error) {
+    say(`새 문서를 만들었습니다 · 목록 갱신 실패: ${error.message}`, 'error');
+  }
+  return { ok: true, created };
 }
 
 function requestNewDocument() {
-  if (!creating) void newDocument();
+  beginNewDraft();
 }
 
 function rowFor(id) {
@@ -343,24 +441,88 @@ function showRow(id) {
   return rowFor(id);
 }
 async function beginRename(id) {
+  if (editing?.pending) return;
   if (current?.id !== id && !(await openDoc(id))) return;
-  const row = showRow(id);
-  if (!row || row.querySelector('.rename-input')) return;
-  const input = document.createElement('input');
-  input.className = 'rename-input'; input.type = 'text';
-  input.value = id.split('/').at(-1);
-  input.setAttribute('aria-label', `${nameOf(id)} 새 이름`);
-  row.classList.add('renaming'); row.append(input); input.focus(); input.select();
-  let composing = false;
-  input.addEventListener('compositionstart', () => { composing = true; });
-  input.addEventListener('compositionend', () => { composing = false; });
-  input.addEventListener('keydown', event => {
-    if (event.key === 'Escape') {
-      input.remove(); row.classList.remove('renaming'); row.querySelector('.doc')?.focus(); event.stopPropagation();
-    } else if (event.key === 'Enter' && !composing && !event.isComposing) {
-      event.preventDefault(); void renameDoc(id, input.value, input);
-    }
-  });
+  showRow(id);
+  const file = id.split('/').at(-1);
+  const match = /^(.*)(\.hwpx|\.hwp)$/i.exec(file);
+  editing = { kind: 'rename', id, label: nameOf(id), groupKey: groupKeyOf(id),
+    draft: match[1], extension: match[2], selection: null, error: null, pending: false };
+  renderDocs(); focusEdit();
+}
+function beginNewDraft() {
+  if (editing?.pending || creating) return;
+  const target = createGroupFor([...groups, ...externalGroups], selectedGroupKey, current?.id);
+  const groupKey = target.kind === 'default' ? '' : target.kind === 'external' ? `ext://${target.key}` : target.name;
+  editing = { kind: 'new', group: target, groupKey, draft: '새 문서', extension: '.hwp',
+    touched: false, selection: null, error: null, pending: false,
+    previousFilter: docFilter.value, wasCollapsed: collapsedGroups.has(groupKey) };
+  docFilter.value = '';
+  expandGroup(groupKey);
+  renderDocs(); focusEdit();
+}
+function focusEdit() {
+  const input = document.querySelector('.doc-edit input');
+  input?.focus(); input?.select();
+  if (editing && input) editing.selection = [input.selectionStart, input.selectionEnd];
+}
+function cancelEdit(restoreFocus = false) {
+  if (!editing || editing.pending) return;
+  const old = editing;
+  editing = null; pendingCancel = false;
+  if (old.kind === 'new') {
+    docFilter.value = old.previousFilter;
+    if (old.wasCollapsed) collapsedGroups.add(old.groupKey);
+  }
+  renderDocs();
+  if (restoreFocus) (old.kind === 'new' ? newButton : rowFor(old.id)?.querySelector('.doc'))?.focus();
+}
+const EDIT_ERRORS = { DOC_EXISTS: '이미 같은 이름의 문서가 있습니다', NAME_COLLISION: '이미 같은 이름의 문서가 있습니다',
+  INVALID_NAME: '이름에 쓸 수 없는 문자가 있습니다', INVALID_FORMAT: '새 문서는 HWP 형식으로만 만들 수 있습니다' };
+function showEditError(code) {
+  if (!editing) return;
+  editing.error = EDIT_ERRORS[code] || '이름을 저장하지 못했습니다';
+  editing.pending = false;
+  renderDocs();
+  focusEdit();
+  say(editing.error, 'error');
+}
+function editBlur(_event, input) {
+  if (rendering || !editing || editing.pending) return;
+  editing.draft = input.value;
+  pendingCancel = true;
+  setTimeout(() => {
+    if (pendingCancel && editing && !document.activeElement?.closest?.('.doc-row[data-edit]')) cancelEdit(false);
+  }, 0);
+}
+function editKey(event, input) {
+  if (!editing) return;
+  if (event.key === 'Tab') { pendingCancel = true; return; }
+  if (event.key === 'Escape' && !event.isComposing && !editing.composing && !editing.pending) {
+    event.preventDefault(); event.stopPropagation(); cancelEdit(true); return;
+  }
+  if (event.key !== 'Enter' || editing.pending || event.isComposing || event.keyCode === 229 || editing.composing || editing.imeJustEnded) return;
+  event.preventDefault(); event.stopPropagation();
+  editing.draft = input.value;
+  void submitEdit();
+}
+async function submitEdit() {
+  const edit = editing;
+  if (!edit || edit.pending) return;
+  let name;
+  try {
+    const base = edit.draft.trim().normalize('NFC');
+    if (!base) throw new Error('INVALID_NAME');
+    name = edit.kind === 'new' ? (edit.touched ? normalizeNewDocName(base) : undefined)
+      : `${base}${edit.extension}`;
+  } catch (error) { showEditError(error.message); return; }
+  edit.pending = true; renderDocs();
+  const input = document.querySelector('.doc-edit input');
+  if (edit.kind === 'new') await newDocument(name, edit.group);
+  else {
+    await renameDoc(edit.id, name, input);
+    if (editing === edit && !edit.error && !edit.keep) { editing = null; renderDocs(); }
+  }
 }
 function startRename() {
   const id = current?.id;
@@ -368,7 +530,7 @@ function startRename() {
   void beginRename(id);
 }
 function renameDoc(id, name, input) {
-  const candidateId = id.slice(0, id.lastIndexOf('/') + 1) + name.normalize('NFC');
+  const candidateId = id.slice(0, id.lastIndexOf('/') + 1) + name.trim().normalize('NFC');
   let sent = false;
   let committed = null;
   const detach = tab => {
@@ -376,8 +538,7 @@ function renameDoc(id, name, input) {
     current = null;
     syncCopyPathButton();
     saveButton.disabled = true;
-    document.body.dataset.noDocument = 'true';
-    studio.element.inert = true;
+    setShellState({ kind: 'error', attemptedId: id, reason: 'RENAME' });
   };
   const reopen = async target => {
     try {
@@ -407,14 +568,17 @@ function renameDoc(id, name, input) {
   const run = openQueue.then(async () => {
     if (saving || agentLocked || current?.id !== id) throw new Error('AGENT_BUSY');
     if ((await studio.getDocumentState()).dirty
-        && !confirm('저장하지 않은 편집을 버리고 이름을 바꾸시겠습니까?')) return;
+        && !confirm('저장하지 않은 편집을 버리고 이름을 바꾸시겠습니까?')) {
+      if (editing) { editing.pending = false; editing.keep = true; renderDocs(); focusEdit(); }
+      return;
+    }
     const tab = current;
     await tab.connected;
     await tab.stopAgent();
     sent = true;
     const response = await fetch(`${docUrl(id)}/rename`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Lease': tab.lease, 'If-Match': tab.etag },
-      body: JSON.stringify({ name }) });
+      body: JSON.stringify({ name: name.trim() }) });
     if (!response.ok) {
       let code = `HTTP ${response.status}`;
       try { code = (await response.json()).error?.code || code; } catch { /* malformed error */ }
@@ -423,10 +587,12 @@ function renameDoc(id, name, input) {
     committed = await response.json();
     if (committed.id !== candidateId) console.warn('rename id mismatch', candidateId, committed.id);
     detach(tab);
+    editing = null;
     filename.textContent = nameOf(committed.id); filename.title = committed.id;
     await loadDocs();
     showRow(committed.id);
     if (!(await reopen(committed.id))) return;
+    editing = null;
     say(`${nameOf(committed.oldId)} → ${nameOf(committed.id)} · 커밋 ${committed.commit}`);
   }).catch(async error => {
     if (committed) {
@@ -435,8 +601,7 @@ function renameDoc(id, name, input) {
       detach(current);
       await reconcile();
     } else {
-      say(`${nameOf(id)} 이름 변경 실패: ${error.message}`);
-      if (input?.isConnected) input.focus();
+      showEditError(error.message);
     }
   });
   openQueue = run.catch(() => {});
@@ -471,11 +636,11 @@ bindListKeys(externalList, (key, expanded) => {
   writeCollapsedGroups(collapsedGroups); renderDocs();
   externalList.querySelector(`.group-header[data-group="${CSS.escape(key)}"]`)?.focus();
 });
-docFilter.addEventListener('input', renderDocs);
+docFilter.addEventListener('input', () => { renderDocs(); announceSearch(); });
 docFilter.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && docFilter.value) { docFilter.value = ''; renderDocs(); event.stopPropagation(); }
+  if (event.key === 'Escape' && docFilter.value) { docFilter.value = ''; renderDocs(); announceSearch(); event.stopPropagation(); }
 });
-refreshButton.addEventListener('click', () => { loadDocs().catch((error) => say(`목록 새로고침 실패: ${error.message}`)); });
+refreshButton.addEventListener('click', () => { void loadDocs().catch(() => {}); });
 folderAdd.addEventListener('click', async () => {
   if (folderAdd.disabled) return;
   folderAdd.disabled = true;
@@ -497,34 +662,12 @@ async function removeFolder(group) {
   } catch (error) { say(`폴더 제거 실패: ${error.message}`); }
 }
 
-// 새 프로젝트: "+"가 목록 맨 위에 인라인 입력 행을 연다. IME 조합 중 Enter는 제출이 아니라 조합 확정이다.
-newButton.addEventListener('click', () => {
-  if (creating || list.querySelector('.new-doc-row')) return;
-  const row = document.createElement('li');
-  row.className = 'new-doc-row';
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.placeholder = '이름 생략 가능 · Enter로 만들기';
-  input.setAttribute('aria-label', '새 한글 문서 이름');
-  let composing = false;
-  let pending = false;
-  input.addEventListener('compositionstart', () => { composing = true; });
-  input.addEventListener('compositionend', () => { composing = false; });
-  input.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !pending) {
-      event.preventDefault(); row.remove(); newButton.focus(); return;
-    }
-    if (event.key !== 'Enter' || composing || event.isComposing || pending) return;
-    event.preventDefault();
-    pending = true;
-    input.readOnly = true;
-    void newDocument(input.value.trim() || undefined).then(({ ok }) => {
-      if (ok) row.remove();
-      else if (row.isConnected) { pending = false; input.readOnly = false; input.focus(); }
-      else newButton.focus();
-    });
-  });
-  row.append(input); list.prepend(row); input.focus();
+newButton.addEventListener('click', beginNewDraft);
+document.addEventListener('pointerdown', event => {
+  if (editing && !editing.pending && !event.target.closest('.doc-row[data-edit]')) pendingCancel = true;
+}, true);
+document.addEventListener('click', () => {
+  if (pendingCancel) setTimeout(() => { if (pendingCancel) cancelEdit(false); }, 0);
 });
 
 projectAdd.addEventListener('click', () => {
@@ -601,13 +744,17 @@ async function importFiles(project, files) {
 }
 
 saveButton.addEventListener('click', () => { void save(); });
+void loadDocs().catch(() => {});
 try {
+  const { createStudio } = await import('/editor/index.js');
   studio = await createStudio('#studio', { studioUrl: '/studio/?chrome=embed' });
+  studio.element.inert = true;
+  document.body.dataset.studioReady = 'true';
+  resolveStudioReady(true);
   studio.onLidgeEvent((event) => dispatchHostEvent(event, {
     save: () => void save(),
     rename: () => startRename(),
     copyPath: () => void copyDocumentPath(current?.id ?? null),
     newDocument: () => requestNewDocument(),
   }));
-  await loadDocs();
-} catch (error) { say(`편집기 시작 실패: ${error.message}`); }
+} catch (error) { resolveStudioReady(false); setShellState({ kind: 'error', reason: 'STUDIO_FAILED' }); say('편집기를 시작하지 못했습니다', 'error'); }

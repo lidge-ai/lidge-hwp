@@ -63,7 +63,7 @@ test('사이드바 토글·구분선 마크업과 접힘 CSS·저장 키가 셸�
   const header = html.split('<header>')[1].split('</header>')[0];
   for (const id of ['filename', 'status', 'save']) assert.match(header, new RegExp(`id="${id}"`));
   assert.doesNotMatch(html, /class="toolbar"/);
-  assert.match(html, /<main id="editor"><div id="studio"><\/div><\/main>/);
+  assert.match(html, /<main id="editor"><div id="studio" inert><\/div><section id="shell-panel"/);
   assert.match(css, /body \{ margin: 0; height: 100dvh; display: flex; flex-direction: column/);
   assert.match(css, /#studio \{ flex: 1; min-height: 0; \}/);
   assert.match(css, /#studio > iframe \{ display: block; \}/);
@@ -91,5 +91,5 @@ test('rename controls, F2 handling, and inline focus styles are served', async t
   assert.match(app, /candidateId = id\.slice/);
   assert.match(projects, /className = 'doc-rename'/);
   assert.match(projects, /contextmenu/);
-  assert.match(css, /\.rename-input:focus-visible/);
+  assert.match(css, /\.doc-edit input:focus-visible/);
 });
