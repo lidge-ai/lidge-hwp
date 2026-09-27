@@ -38,6 +38,8 @@ import type { TableObjectRenderer } from './table-object-renderer';
 import type { TableResizeRenderer, BorderEdge } from './table-resize-renderer';
 import type { CellBbox, CellPathLike } from '@/core/types';
 import { showConfirm } from '@/ui/confirm-dialog';
+import { askCellBlockDelete } from '@/ui/cell-block-delete-dialog';
+import { clampedCellAfterDelete } from '@/command/commands/table';
 import * as _mouse from './input-handler-mouse';
 import * as _table from './input-handler-table';
 import * as _keyboard from './input-handler-keyboard';
@@ -5669,9 +5671,114 @@ export class InputHandler {
       }});
       return;
     }
+    if (this.cursor.isInCellSelectionMode()) {
+      // 셀 블록 지우기 (한컴 "지우기" ⌘E): 내용만 지우거나, 전체 줄/칸 블록이면
+      // 구조 삭제 여부를 묻는다.
+      // 부분 실패는 SnapshotCommand가 이미 복원했다. 여기서는 처리되지 않은 거부만 막는다.
+      void this.deleteSelectedCellBlock().catch((err) => {
+        console.warn('[InputHandler] 셀 블록 지우기 실패:', err);
+      });
+      return;
+    }
     if (this.cursor.hasSelection()) {
       this.deleteSelection();
     }
+  }
+
+  /**
+   * 셀 블록 지우기 (편집 > 지우기 / ⌘E·⌘⌫·⌘Delete 경유).
+   *
+   * 한컴 정합: 블록이 전체 줄(모든 칸) 또는 전체 칸(모든 줄)을 덮을 때는
+   * "셀 모양을 남길까요" 를 묻고 [지우기]면 줄/칸/표를 구조 삭제한다.
+   * 그 외 블록(부분 영역·중첩 표·제외 셀·병합 경계 걸침)은 묻지 않고 내용만 지운다
+   * — 한컴도 정렬되지 않은 줄/칸은 지울 수 없다.
+   */
+  private async deleteSelectedCellBlock(): Promise<void> {
+    if (this.cursor.isProtectedCellSelectionMode()) return;
+    const ctx = this.cursor.getCellTableContext();
+    const range = this.cursor.getSelectedCellRange();
+    if (!ctx || !range) return;
+
+    const clearContents = () => {
+      this.clearSelectedCellBlock();
+      this.updateCellSelection();
+    };
+
+    const nested = (ctx.cellPath?.length ?? 0) > 1;
+    let structural: 'table' | 'rows' | 'cols' | null = null;
+    if (!nested && this.cursor.getExcludedCells().size === 0) {
+      const dims = this.wasm.getTableDimensions(ctx.sec, ctx.ppi, ctx.ci);
+      const fullRows = range.startCol === 0 && range.endCol === dims.colCount - 1;
+      const fullCols = range.startRow === 0 && range.endRow === dims.rowCount - 1;
+      if (fullRows || fullCols) {
+        // 병합 셀이 블록 경계를 걸치면(일부만 선택 범위 안) 줄/칸 삭제가 성립하지 않는다.
+        const bboxes = this.wasm.getTableCellBboxes(ctx.sec, ctx.ppi, ctx.ci);
+        const straddles = bboxes.some((b) => {
+          if (fullRows) {
+            const inside = b.row >= range.startRow && b.row + b.rowSpan - 1 <= range.endRow;
+            const touches = b.row <= range.endRow && b.row + b.rowSpan - 1 >= range.startRow;
+            return touches && !inside;
+          }
+          const inside = b.col >= range.startCol && b.col + b.colSpan - 1 <= range.endCol;
+          const touches = b.col <= range.endCol && b.col + b.colSpan - 1 >= range.startCol;
+          return touches && !inside;
+        });
+        if (!straddles) {
+          structural = fullRows && fullCols ? 'table' : fullRows ? 'rows' : 'cols';
+        }
+      }
+    }
+
+    if (!structural) {
+      clearContents();
+      return;
+    }
+
+    const answer = await askCellBlockDelete();
+    // 어떤 선택이든 대화상자 뒤에는 편집 포커스를 되돌린다.
+    this.focusTextarea();
+    if (answer === 'cancel') return;
+    if (answer === 'keep') {
+      clearContents();
+      return;
+    }
+
+    const selection = this.cursor.captureCellSelection();
+    const pos = this.cursor.getPosition();
+    const bodyPos: DocumentPosition = { sectionIndex: ctx.sec, paragraphIndex: ctx.ppi, charOffset: 0 };
+    this.executeOperation({
+      kind: 'snapshot',
+      operationType: 'deleteCellBlock',
+      operation: (wasm: WasmBridge) => {
+        if (structural === 'table') {
+          wasm.deleteTableControl(ctx.sec, ctx.ppi, ctx.ci);
+          return bodyPos;
+        }
+        let result: { ok: boolean; rowCount: number; colCount: number } | null = null;
+        if (structural === 'rows') {
+          for (let r = range.endRow; r >= range.startRow; r -= 1) {
+            result = wasm.deleteTableRow(ctx.sec, ctx.ppi, ctx.ci, r);
+            if (!result?.ok) throw new Error('셀 블록 행 삭제 실패');
+          }
+        } else {
+          for (let c = range.endCol; c >= range.startCol; c -= 1) {
+            result = wasm.deleteTableColumn(ctx.sec, ctx.ppi, ctx.ci, c);
+            if (!result?.ok) throw new Error('셀 블록 열 삭제 실패');
+          }
+        }
+        const corrected = result && clampedCellAfterDelete(
+          wasm, ctx.sec, ctx.ppi, ctx.ci,
+          range.startRow, range.startCol, result.rowCount, result.colCount,
+        );
+        if (!corrected) return bodyPos;
+        return { ...pos, charOffset: 0, cellIndex: corrected.cellIndex, cellParaIndex: corrected.cellParaIndex };
+      },
+      selectionBefore: selection ? { mode: 'cellBlock', state: selection } : null,
+    });
+    // 구조 삭제로 선택된 셀 자체가 사라졌다 — 블록을 내린다.
+    this.cursor.exitCellSelectionMode();
+    this.cellSelectionRenderer?.clear();
+    this.updateCaret();
   }
 
   /** 전체 선택 (커맨드 시스템용) */
