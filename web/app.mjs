@@ -2,7 +2,7 @@ import { createStudio } from '/editor/index.js';
 import { startAgentChannel } from '/agent-channel.mjs';
 import { followSwitch } from '/follow-switch.mjs';
 import { initSidebar } from '/sidebar.mjs';
-import { groupDocs, groupKeyOf, renderProjects, readCollapsedGroups, writeCollapsedGroups, bindListKeys, displayName } from '/projects.mjs';
+import { groupDocs, groupKeyOf, matchDoc, renderProjects, readCollapsedGroups, writeCollapsedGroups, bindListKeys, displayName } from '/projects.mjs';
 
 initSidebar();
 
@@ -62,7 +62,7 @@ function openDocNow(id, { reservation = null, agent = false } = {}) {
 
 // 문서 하나로 바꾼다. 새 문서가 열렸으면 true. AI 전환(agent)은 멈출 이유를 던지고(followSwitch가 정리),
 // 사람 전환은 상태줄에 알리고 false를 돌려준다.
-async function switchTo(id, { reservation = null, agent = false } = {}) {
+async function switchTo(id, { reservation = null, agent = false, rethrow = false } = {}) {
   if (saving) { if (agent) throw new Error('SAVING'); return false; }
   if (current?.id === id) { if (agent) throw new Error('ALREADY_OPEN'); return false; }
   if (current && (await studio.getDocumentState()).dirty) {
@@ -98,6 +98,20 @@ async function switchTo(id, { reservation = null, agent = false } = {}) {
     await studio.loadFile(bytes, id.split('/').at(-1));
     const tab = next;
     tab.events = new EventSource(`/api/events?lease=${encodeURIComponent(lease)}`);
+    tab.connected = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => finish(new Error('SSE_HELLO_TIMEOUT')), 5000);
+      const hello = () => finish(null);
+      const failed = () => finish(new Error('SSE_CONNECT_FAILED'));
+      function finish(error) {
+        clearTimeout(timer);
+        tab.events.removeEventListener('hello', hello);
+        tab.events.removeEventListener('error', failed);
+        if (error) reject(error); else resolve();
+      }
+      tab.events.addEventListener('hello', hello, { once: true });
+      tab.events.addEventListener('error', failed, { once: true });
+    });
+    tab.connected.catch(() => {});
     tab.events.addEventListener('error', () => { saveButton.disabled = true; say('연결이 끊겼습니다. 문서를 다시 여세요.'); });
     // 같은 틱에 리스너를 붙이므로 첫 SSE 이벤트를 놓치지 않는다.
     tab.stopAgent = startAgentChannel({ editor: studio, events: tab.events, docId: id, lease,
@@ -148,7 +162,7 @@ async function switchTo(id, { reservation = null, agent = false } = {}) {
       studio.element.blur?.();
     }
     // AI 전환은 알림을 followSwitch 한 곳이 맡는다(중복 알림·구체 사유 덮어쓰기 방지). 화면 정리만 하고 던진다.
-    if (agent) throw error;
+    if (agent || rethrow) throw error;
     say(error.message === 'DOCUMENT_LOCKED'
       ? `${nameOf(id)}는 AI가 편집 중입니다 · 끝난 뒤 목록에서 다시 여세요`
       : `열기 실패: ${error.message} · 목록에서 문서를 다시 선택하세요`);
@@ -203,6 +217,7 @@ function renderDocs() {
     : null;
   renderProjects(list, groups, {
     currentId: current?.id ?? null, collapsed: collapsedGroups, query: docFilter.value,
+    onRename: id => { void beginRename(id); },
     onOpen: (id) => { openHadListFocus = list.contains(document.activeElement); void openDoc(id); },
     onToggle: (key, expanded) => {
       if (expanded) collapsedGroups.delete(key); else collapsedGroups.add(key);
@@ -225,6 +240,7 @@ function renderDocs() {
   });
   renderProjects(externalList, externalGroups, {
     currentId: current?.id ?? null, collapsed: collapsedGroups, query: docFilter.value,
+    onRename: id => { void beginRename(id); },
     emptyLabel: externalGroups.length === 0 ? '추가한 폴더가 없습니다.' : '추가한 폴더에 HWP/HWPX가 없습니다.',
     onOpen: id => { openHadListFocus = externalList.contains(document.activeElement); void openDoc(id); },
     onToggle: (key, expanded) => {
@@ -253,6 +269,124 @@ async function loadDocs() {
   renderDocs();
   say(docs.length === 0 ? '문서함에 HWP/HWPX가 없습니다.' : '문서를 선택하세요.');
 }
+
+function rowFor(id) {
+  return (list.querySelector(`.doc[data-id="${CSS.escape(id)}"]`)
+    || externalList.querySelector(`.doc[data-id="${CSS.escape(id)}"]`))?.closest('.doc-row');
+}
+function showRow(id) {
+  if (docFilter.value && ![...groups, ...externalGroups].flatMap(group => group.docs)
+    .some(doc => doc.id === id && matchDoc(doc, docFilter.value))) docFilter.value = '';
+  expandGroup(groupKeyOf(id));
+  renderDocs();
+  return rowFor(id);
+}
+async function beginRename(id) {
+  if (current?.id !== id && !(await openDoc(id))) return;
+  const row = showRow(id);
+  if (!row || row.querySelector('.rename-input')) return;
+  const input = document.createElement('input');
+  input.className = 'rename-input'; input.type = 'text';
+  input.value = id.split('/').at(-1);
+  input.setAttribute('aria-label', `${nameOf(id)} 새 이름`);
+  row.classList.add('renaming'); row.append(input); input.focus(); input.select();
+  let composing = false;
+  input.addEventListener('compositionstart', () => { composing = true; });
+  input.addEventListener('compositionend', () => { composing = false; });
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      input.remove(); row.classList.remove('renaming'); row.querySelector('.doc')?.focus(); event.stopPropagation();
+    } else if (event.key === 'Enter' && !composing && !event.isComposing) {
+      event.preventDefault(); void renameDoc(id, input.value, input);
+    }
+  });
+}
+function renameDoc(id, name, input) {
+  const candidateId = id.slice(0, id.lastIndexOf('/') + 1) + name.normalize('NFC');
+  let sent = false;
+  let committed = null;
+  const detach = tab => {
+    tab?.events?.close();
+    current = null;
+    saveButton.disabled = true;
+    document.body.dataset.noDocument = 'true';
+    studio.element.inert = true;
+  };
+  const reopen = async target => {
+    try {
+      if (!(await switchTo(target, { rethrow: true }))) throw new Error('REOPEN_FAILED');
+      showRow(target)?.querySelector('.doc')?.focus();
+      return true;
+    } catch (error) {
+      if (error.message === 'DOCUMENT_QUARANTINED') say(`${nameOf(target)} 격리됨 · 수동 복구가 필요합니다`);
+      else say(`${nameOf(target)} 다시 열기 실패: ${error.message} · 목록에서 다시 선택하세요`);
+      return false;
+    }
+  };
+  const reconcile = async () => {
+    say('이름 변경 결과 확인 중…');
+    try {
+      await loadDocs();
+      const ids = new Set([...groups, ...externalGroups].flatMap(group => group.docs.map(doc => doc.id)));
+      const newExists = ids.has(candidateId), oldExists = ids.has(id);
+      if (newExists === oldExists) throw new Error('AMBIGUOUS_RENAME');
+      const target = newExists ? candidateId : id;
+      if (!(await reopen(target))) return;
+      say(newExists ? `${nameOf(id)} → ${nameOf(target)} · 이름 변경 완료` : `${nameOf(id)} 이름 변경되지 않음 · 다시 열림`);
+    } catch {
+      say('이름 변경 결과를 확인할 수 없음 · 목록을 새로 고친 뒤 다시 여세요');
+    }
+  };
+  const run = openQueue.then(async () => {
+    if (saving || agentLocked || current?.id !== id) throw new Error('AGENT_BUSY');
+    if ((await studio.getDocumentState()).dirty
+        && !confirm('저장하지 않은 편집을 버리고 이름을 바꾸시겠습니까?')) return;
+    const tab = current;
+    await tab.connected;
+    await tab.stopAgent();
+    sent = true;
+    const response = await fetch(`${docUrl(id)}/rename`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Lease': tab.lease, 'If-Match': tab.etag },
+      body: JSON.stringify({ name }) });
+    if (!response.ok) {
+      let code = `HTTP ${response.status}`;
+      try { code = (await response.json()).error?.code || code; } catch { /* malformed error */ }
+      throw Object.assign(new Error(code), { status: response.status });
+    }
+    committed = await response.json();
+    if (committed.id !== candidateId) console.warn('rename id mismatch', candidateId, committed.id);
+    detach(tab);
+    filename.textContent = nameOf(committed.id); filename.title = committed.id;
+    await loadDocs();
+    showRow(committed.id);
+    if (!(await reopen(committed.id))) return;
+    say(`${nameOf(committed.oldId)} → ${nameOf(committed.id)} · 커밋 ${committed.commit}`);
+  }).catch(async error => {
+    if (committed) {
+      say(`${nameOf(committed.id)} 이름 변경 완료 · 목록/재열기 실패: ${error.message}`);
+    } else if (sent && !(error.status >= 400 && error.status < 500)) {
+      detach(current);
+      await reconcile();
+    } else {
+      say(`${nameOf(id)} 이름 변경 실패: ${error.message}`);
+      if (input?.isConnected) input.focus();
+    }
+  });
+  openQueue = run.catch(() => {});
+  return run;
+}
+document.addEventListener('keydown', event => {
+  const cmd = event.metaKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'r';
+  const f2 = event.key === 'F2' && !event.metaKey && !event.ctrlKey && !event.altKey;
+  if (!cmd && !f2) return;
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.isComposing) return;
+  const focused = document.activeElement?.closest?.('.doc-row')?.querySelector('.doc[data-id]')
+    ?? document.activeElement?.closest?.('.doc[data-id]');
+  const id = focused?.dataset.id ?? current?.id;
+  if (!id) return;
+  event.preventDefault();
+  void beginRename(id);
+});
 bindListKeys(list, (key, expanded) => {
   if (expanded) collapsedGroups.delete(key); else collapsedGroups.add(key);
   writeCollapsedGroups(collapsedGroups);

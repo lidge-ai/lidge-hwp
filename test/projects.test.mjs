@@ -94,6 +94,32 @@ test('renderProjects gives documents path labels and hides format/count badges f
   } finally { delete globalThis.document; }
 });
 
+test('renderProjects exposes rename button and context menu with the exact document id', () => {
+  globalThis.document = { createElement: fakeElement, createElementNS: (_ns, tag) => fakeElement(tag) };
+  try {
+    const key = '11111111-1111-4111-8111-111111111111';
+    const id = `ext://${key}/nested/a.hwp`;
+    const { primary, external } = groupDocs([
+      { id: 'P/a.hwp', format: 'hwp' }, { id, format: 'hwp' },
+    ], ['P'], [{ key, label: '외부', path: '/tmp/external', available: true }]);
+    const seen = [];
+    for (const groups of [primary, external]) {
+      const list = fakeElement('ul');
+      renderProjects(list, groups, { onRename: candidate => seen.push(candidate) });
+      const nodes = walk(list);
+      const rename = nodes.find(node => node.className === 'doc-rename');
+      const row = nodes.find(node => node.className === 'doc-row');
+      assert.ok(rename);
+      assert.match(rename.getAttribute('aria-label'), /이름 바꾸기$/);
+      rename.listeners.click[0]();
+      let prevented = false;
+      row.listeners.contextmenu[0]({ preventDefault() { prevented = true; } });
+      assert.equal(prevented, true);
+    }
+    assert.deepEqual(seen, ['P/a.hwp', 'P/a.hwp', id, id]);
+  } finally { delete globalThis.document; }
+});
+
 test('external ids group by UUID and unavailable roots retain label, path, and reason', () => {
   globalThis.document = { createElement: fakeElement, createElementNS: (_ns, tag) => fakeElement(tag) };
   try {

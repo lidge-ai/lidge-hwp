@@ -41,6 +41,16 @@ export function createTabs() {
     return lease;
   }
   function owns(lease, docId) { return byLease.get(lease)?.docId === docId; }
+  function canRename(lease, docId, nextId = null) {
+    const tab = byLease.get(lease);
+    if (!tab || tab.docId !== docId || !tab.response || tab.response.writableEnded) return 'LEASE_REQUIRED';
+    if (tab.isolated) return 'LEASE_ISOLATED';
+    if ([...pending.values()].some(job => job.lease === lease)
+        || [...saves.values()].some(save => save.lease === lease)) return 'AGENT_BUSY';
+    if (reservations.has(docId)) return 'DOC_RESERVED';
+    if (nextId && (reservations.has(nextId) || byDoc.has(nextId))) return 'DOC_RESERVED';
+    return null;
+  }
   // SSE가 붙은 탭만 주인이다.
   function owner(docId) {
     const lease = byDoc.get(docId);
@@ -230,5 +240,5 @@ export function createTabs() {
 
   return { claim, owns, owner, claimed, release, events, close, requestAgent, acceptReply,
     agentLockFor, finishAgentSave, saveStatus, waitAgentSave, isIsolated, isolate,
-    followTarget, reserve, cancelReservation, waitConnected, reservedFor, agentExpected, hasRootActivity };
+    followTarget, reserve, cancelReservation, waitConnected, reservedFor, agentExpected, hasRootActivity, canRename };
 }

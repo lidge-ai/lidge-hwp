@@ -47,6 +47,12 @@ ul { list-style: none; margin: 0; padding: 0; }
 #docs .count, #external-docs .count { flex: none; font-size: .72rem; font-weight: 500; color: #5b6573; background: #e3e8ef; border-radius: .55rem; padding: 0 .45rem; }
 #docs .group-docs, #external-docs .group-docs { margin: 0 0 .2rem; padding-left: 1.1rem; }
 #docs .doc, #external-docs .doc { display: flex; align-items: center; gap: .4rem; }
+#docs .doc-row, #external-docs .doc-row { display: flex; align-items: center; min-width: 0; }
+#docs .doc-row > .doc, #external-docs .doc-row > .doc { flex: 1; min-width: 0; }
+#docs .doc-row > .doc-rename, #external-docs .doc-row > .doc-rename { flex: none; width: auto; min-width: 2.5rem; font-size: .72rem; color: #5b6573; }
+#docs .rename-input, #external-docs .rename-input { flex: 1; min-width: 0; border: 1px solid #165a91; background: white; font: inherit; }
+.rename-input:focus-visible { outline: 3px solid #1266a3; }
+.doc-row.renaming > .doc, .doc-row.renaming > .doc-rename { display: none; }
 #docs .doc-name, #external-docs .doc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 #docs .badge, #external-docs .badge { flex: none; font-size: .65rem; color: #5b6573; }
 #docs .empty, #external-docs .empty { padding: .6rem .5rem; font-size: .8rem; color: #5b6573; }

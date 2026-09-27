@@ -82,6 +82,7 @@ export function writeCollapsedGroups(collapsed, storage = globalThis.localStorag
 // query가 있으면 일치하는 그룹만 펼친 채로 보여 주고 접힘 저장소는 건드리지 않는다.
 export function renderProjects(listEl, groups, { currentId = null, collapsed = new Set(),
     query = '', onOpen = () => {}, onToggle = () => {}, groupActions = null, onImport = null,
+    onRename = () => {},
     emptyLabel = '문서함에 HWP/HWPX가 없습니다.' } = {}) {
   listEl.textContent = '';
   let shown = 0;
@@ -152,6 +153,7 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
     body.hidden = !expanded;
     for (const doc of docs) {
       const row = document.createElement('li');
+      row.className = 'doc-row';
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'doc';
@@ -172,6 +174,15 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
       button.append(name, badge);
       button.addEventListener('click', () => onOpen(doc.id));
       row.append(button);
+      const rename = document.createElement('button');
+      rename.type = 'button';
+      rename.className = 'doc-rename';
+      rename.textContent = '이름';
+      rename.title = `${shown} 이름 바꾸기`;
+      rename.setAttribute('aria-label', `${shown} 이름 바꾸기`);
+      rename.addEventListener('click', () => onRename(doc.id));
+      row.append(rename);
+      row.addEventListener('contextmenu', event => { event.preventDefault(); onRename(doc.id); });
       body.append(row);
     }
     item.append(body);
