@@ -396,13 +396,16 @@ export class RhwpEditor {
     };
   }
 
-  /** Studio Save/Ctrl+S의 lidge.hostSaveRequested 이벤트를 구독합니다. */
+  /** Studio의 호스트 문서 작업 요청을 구독합니다. */
   onLidgeEvent(listener) {
     if (!this._transport.supports('lidge-host-v1')) throw new Error('lidge-host-v1 unavailable');
     if (typeof listener !== 'function') throw new TypeError('listener must be a function');
-    return this._transport.on('lidge.hostSaveRequested', (payload) => {
-      if (payload?.schemaVersion === 1) listener({ event: 'lidge.hostSaveRequested', payload });
-    });
+    const names = ['lidge.hostSaveRequested', 'lidge.hostRenameRequested',
+      'lidge.hostCopyPathRequested', 'lidge.hostNewRequested'];
+    const off = names.map((event) => this._transport.on(event, (payload) => {
+      if (payload?.schemaVersion === 1 && Object.keys(payload).length === 1) listener({ event, payload });
+    }));
+    return () => { for (const unsubscribe of off) unsubscribe(); };
   }
 
   // ── 브리지 표면 (studio 자동화·플러그인·창 제어) ─────────────────

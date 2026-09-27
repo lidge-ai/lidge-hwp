@@ -7,6 +7,8 @@
  * unsupportedReason으로 보고한다.
  */
 
+import { isTextEditingTarget } from '../command/document-shortcut-guard.ts';
+
 export type ChromeMode = 'full' | 'embed';
 export type ChromeModeRequestSource = 'default' | 'url';
 export type ChromeModeUnsupportedReason = 'unsupportedChromeMode';
@@ -60,6 +62,30 @@ export interface EmbedShortcutKeyEventLike {
   metaKey: boolean;
   altKey: boolean;
   shiftKey: boolean;
+}
+
+export type EmbedHostAction = 'lidge.hostRenameRequested' | 'lidge.hostCopyPathRequested' | 'lidge.hostNewRequested';
+
+export function embedHostAction(e: EmbedShortcutKeyEventLike & { code?: string; isComposing?: boolean }): EmbedHostAction | null {
+  if (e.isComposing) return null;
+  if (e.key === 'F2' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey)
+    return 'lidge.hostRenameRequested';
+  if (!e.metaKey || e.ctrlKey) return null;
+  const code = e.code;
+  const key = e.key.toLowerCase();
+  if (e.shiftKey && !e.altKey && (code === 'KeyR' || key === 'r' || key === 'ㄱ'))
+    return 'lidge.hostRenameRequested';
+  if (e.shiftKey && !e.altKey && (code === 'KeyC' || key === 'c' || key === 'ㅊ'))
+    return 'lidge.hostCopyPathRequested';
+  if (!e.shiftKey && (code === 'KeyN' || key === 'n' || key === 'ㅜ'))
+    return 'lidge.hostNewRequested';
+  return null;
+}
+
+export function shouldForwardHostShortcut(target: EventTarget | null, modalOpen: boolean): boolean {
+  if (modalOpen) return false;
+  if (!isTextEditingTarget(target)) return true;
+  return (target as HTMLElement).closest?.('[data-rhwp-editor-input="true"]') != null;
 }
 
 /**

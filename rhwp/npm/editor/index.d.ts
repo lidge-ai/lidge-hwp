@@ -337,7 +337,12 @@ export declare class RhwpEditor {
     request(method: 'highlightCells', params: { cells: LidgeAgentCell[]; ms: number }): Promise<{ highlighted: number }>;
   };
   /** lidge-host-v1: Studio Save/Ctrl+S의 호스트 저장 요청 이벤트 구독 */
-  onLidgeEvent(listener: (event: { event: 'lidge.hostSaveRequested'; payload: { schemaVersion: 1 } }) => void): () => void;
+  /** lidge-host-v1: Studio가 요청한 호스트 문서 작업. */
+  onLidgeEvent(listener: (event: {
+    event: 'lidge.hostSaveRequested' | 'lidge.hostRenameRequested'
+      | 'lidge.hostCopyPathRequested' | 'lidge.hostNewRequested';
+    payload: { schemaVersion: 1 };
+  }) => void): () => void;
   /** iframe 엘리먼트를 반환합니다 */
   readonly element: HTMLIFrameElement;
   // ── 브리지 표면 ────────────────────────────────────────────────

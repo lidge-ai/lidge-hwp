@@ -200,6 +200,37 @@ test('EditorTransport는 bound v1 session의 documentChanged event만 전달한�
   server.close();
 });
 
+test('transport allows only v1 lidge host events with negotiated capability', async () => {
+  let connected;
+  const iframe = { contentWindow: { postMessage(message, _origin, ports) {
+    connected = ports[0];
+    connected.start();
+    connected.postMessage({ type: 'rhwp-connected', version: 1, sessionId: message.sessionId,
+      capabilities: ['transferable-array-buffer', 'lidge-host-v1'] });
+  } } };
+  const transport = new EditorTransport(iframe, 'https://studio.example/app',
+    { window: { addEventListener() {}, removeEventListener() {} } });
+  await transport.connect();
+  const names = ['lidge.hostSaveRequested', 'lidge.hostRenameRequested',
+    'lidge.hostCopyPathRequested', 'lidge.hostNewRequested'];
+  const seen = [];
+  for (const name of names) transport.on(name, () => seen.push(name));
+  const send = (event, overrides = {}) => transport._handlePortMessage({ type: 'rhwp-event',
+    version: 1, sessionId: transport._sessionId, event, payload: { schemaVersion: 1 }, ...overrides });
+  for (const name of names) send(name);
+  assert.deepEqual(seen, names);
+  send('lidge.hostNewRequested', { sessionId: 'forged' });
+  send('lidge.hostNewRequested', { version: 2 });
+  send('lidge.hostNewRequested', { payload: { schemaVersion: 2 } });
+  send('lidge.hostNewRequested', { payload: { schemaVersion: 1, extra: true } });
+  send('lidge.unknown');
+  assert.deepEqual(seen, names);
+  transport._peerCapabilities.delete('lidge-host-v1');
+  send('lidge.hostNewRequested');
+  assert.deepEqual(seen, names);
+  transport.destroy(); connected.close();
+});
+
 test('EditorTransport는 document-agent recovered 오류 필드를 보존한다', async () => {
   let server;
   const contentWindow = {

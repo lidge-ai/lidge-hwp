@@ -6,10 +6,13 @@ import { readFileSync } from 'node:fs';
 import {
   EMBED_HIDDEN_EDIT_COMMAND_IDS,
   EMBED_HIDDEN_FILE_COMMAND_IDS,
+  embedHostAction,
   isEmbedSwallowedFileShortcut,
   resolveChromeMode,
   resolveChromeModeRequest,
+  shouldForwardHostShortcut,
 } from '../src/ui/chrome-mode.ts';
+import { onLidgeHostEvent, requestLidgeHostAction, requestLidgeHostSave, setLidgeHostConnected } from '../src/lidge/host.ts';
 import { CommandRegistry } from '../src/command/registry.ts';
 import { defaultShortcuts, matchShortcut } from '../src/command/shortcut-map.ts';
 
@@ -198,14 +201,59 @@ test('embed 저장·인쇄 단축키 판정은 문서 로드 여부와 무관한
   // 전파를 끊는다 — embed 저장은 lidge 호스트 저장으로 간다. 나머지 파일 단축키는
   // 기존대로 preventDefault로만 삼킨다.
   const mainSource = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
-  assert.match(
-    mainSource,
-    /if \(chromeMode === 'embed'\) \{[\s\S]*?document\.addEventListener\('keydown', \(e\) => \{\n\s*if \(\(e\.ctrlKey \|\| e\.metaKey\) && !e\.altKey && !e\.shiftKey\n\s*&& \(e\.key\.toLowerCase\(\) === 's' \|\| e\.key === 'ㄴ'\)\) \{\n\s*e\.preventDefault\(\);\n\s*e\.stopImmediatePropagation\(\);\n\s*dispatcher\.dispatch\('file:save'\);\n\s*return;\n\s*\}\n\s*if \(isEmbedSwallowedFileShortcut\(e\)\) e\.preventDefault\(\);\n\s*\}, true\);/,
-  );
+  assert.match(mainSource, /if \(chromeMode === 'embed'\) \{[\s\S]*?document\.addEventListener\('keydown', \(e\) => \{\n\s*const action = embedHostAction\(e\);/);
+  assert.match(mainSource, /if \(action && shouldForwardHostShortcut\(e\.target, !!document\.querySelector\('\.modal-overlay'\)\?\.isConnected\)\) \{\n\s*e\.preventDefault\(\);\n\s*e\.stopImmediatePropagation\(\);\n\s*requestLidgeHostAction\(action\);\n\s*return;/);
+  assert.match(mainSource, /if \(\(e\.ctrlKey \|\| e\.metaKey\) && !e\.altKey && !e\.shiftKey\n\s*&& \(e\.key\.toLowerCase\(\) === 's' \|\| e\.key === 'ㄴ'\)\) \{\n\s*e\.preventDefault\(\);\n\s*e\.stopImmediatePropagation\(\);\n\s*dispatcher\.dispatch\('file:save'\);\n\s*return;\n\s*\}\n\s*if \(isEmbedSwallowedFileShortcut\(e\)\) e\.preventDefault\(\);\n\s*\}, true\);/);
   // dispatch 대상이 embed에서 등록돼 있어야 한다(미등록 dispatch는 무해한 no-op이다).
   // Save As는 저장 대상 경로를 바꿀 수 있으므로 계속 숨긴다.
   assert.equal(EMBED_HIDDEN_FILE_COMMAND_IDS.includes('file:save'), false);
   assert.equal(EMBED_HIDDEN_FILE_COMMAND_IDS.includes('file:save-as'), true);
+});
+
+test('embed host shortcuts route physical keys without stealing format copy', () => {
+  const base = { key: '', code: '', ctrlKey: false, metaKey: true,
+    altKey: false, shiftKey: false, isComposing: false };
+  assert.equal(embedHostAction({ ...base, key: 'R', code: 'KeyR', shiftKey: true }), 'lidge.hostRenameRequested');
+  assert.equal(embedHostAction({ ...base, key: 'Process', code: 'KeyC', shiftKey: true }), 'lidge.hostCopyPathRequested');
+  assert.equal(embedHostAction({ ...base, key: 'n', code: 'KeyN' }), 'lidge.hostNewRequested');
+  assert.equal(embedHostAction({ ...base, key: 'Dead', code: 'KeyN', altKey: true }), 'lidge.hostNewRequested');
+  assert.equal(embedHostAction({ ...base, key: 'F2', metaKey: false }), 'lidge.hostRenameRequested');
+  assert.equal(embedHostAction({ ...base, key: 'F2', metaKey: false, shiftKey: true }), null);
+  assert.equal(embedHostAction({ ...base, key: 'F2' }), null);
+  assert.equal(embedHostAction({ ...base, key: 'c', code: 'KeyC', metaKey: false, altKey: true }), null);
+  assert.equal(embedHostAction({ ...base, key: 'Process', code: 'KeyC', shiftKey: true, isComposing: true }), null);
+  assert.equal(embedHostAction({ ...base, key: 'F2', metaKey: false, isComposing: true }), null);
+  assert.equal(embedHostAction({ ...base, key: 'c', code: 'KeyC', ctrlKey: true }), null);
+});
+
+test('embed host shortcuts respect modal and text input ownership', () => {
+  const input = (tagName: string, editor: boolean, parentElement: unknown = null) => ({
+    tagName, parentElement, isContentEditable: false, getAttribute: () => null,
+    closest: (selector: string) => selector === '[data-rhwp-editor-input="true"]' && editor ? {} : null,
+  });
+  const editorInput = input('TEXTAREA', true);
+  assert.equal(shouldForwardHostShortcut(editorInput as unknown as EventTarget, false), true);
+  assert.equal(shouldForwardHostShortcut(input('INPUT', false) as unknown as EventTarget, false), false);
+  assert.equal(shouldForwardHostShortcut(editorInput as unknown as EventTarget, true), false);
+  assert.equal(shouldForwardHostShortcut(input('BODY', false) as unknown as EventTarget, false), true);
+  const editable = { tagName: 'DIV', isContentEditable: true, parentElement: null,
+    getAttribute: () => null, closest: () => null };
+  assert.equal(shouldForwardHostShortcut(input('SPAN', false, editable) as unknown as EventTarget, false), false);
+});
+
+test('lidge host actions emit only while a host is connected', () => {
+  const events: string[] = [];
+  setLidgeHostConnected(false);
+  const off = onLidgeHostEvent(event => events.push(event.event));
+  try {
+    assert.equal(requestLidgeHostAction('lidge.hostNewRequested'), false);
+    assert.equal(requestLidgeHostSave(), false);
+    assert.deepEqual(events, []);
+    setLidgeHostConnected(true);
+    assert.equal(requestLidgeHostAction('lidge.hostRenameRequested'), true);
+    assert.equal(requestLidgeHostSave(), true);
+    assert.deepEqual(events, ['lidge.hostRenameRequested', 'lidge.hostSaveRequested']);
+  } finally { off(); setLidgeHostConnected(false); }
 });
 
 test('embed의 unsaved guard는 로컬 저장 선택지를 막고 자동 discard는 하지 않는다', () => {

@@ -112,7 +112,12 @@ jobs:
           npm ci
           node --test tests/cell-block-cmd-delete.test.ts tests/issue-6741-cellblock-delete-undo.test.ts \
             tests/select-all-cmd-a.test.ts tests/mutation-routing-guard.test.ts \
-            tests/ime-shortcut-routing.test.ts tests/issue-3414-shortcut-routing.test.ts
+            tests/ime-shortcut-routing.test.ts tests/issue-3414-shortcut-routing.test.ts \
+            tests/chrome-mode.test.ts
+      - name: Editor wrapper tests (shard 1 only)
+        if: matrix.shard == 1
+        working-directory: rhwp/npm/editor
+        run: node --test tests/*.test.mjs
 
   lint:
     name: lint

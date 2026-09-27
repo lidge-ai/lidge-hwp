@@ -55,8 +55,10 @@ import { showHwpPasswordDialog } from '@/ui/hwp-password-dialog';
 import {
   EMBED_HIDDEN_EDIT_COMMAND_IDS,
   EMBED_HIDDEN_FILE_COMMAND_IDS,
+  embedHostAction,
   isEmbedSwallowedFileShortcut,
   resolveChromeModeRequest,
+  shouldForwardHostShortcut,
 } from '@/ui/chrome-mode';
 import { initRhwpDev } from '@/core/rhwp-dev';
 import { DocumentDirtyState } from '@/core/document-dirty-state';
@@ -104,7 +106,7 @@ import { CENTER_ZOOM_ANCHOR } from '@/view/zoom-anchor';
 import { withBusyCursor } from '@/view/busy-cursor';
 import { formatPageIndicator } from '@/view/page-indicator';
 import { installEmbedRuntime } from '@/embed/runtime';
-import { exportWithReport, onLidgeHostEvent } from '@/lidge/host';
+import { exportWithReport, onLidgeHostEvent, requestLidgeHostAction } from '@/lidge/host';
 import { applyOps, rollbackOps, type AgentOpsDeps } from '@/lidge/agent-ops';
 import { AgentInputLock } from '@/lidge/input-lock';
 import { AgentHighlight } from '@/lidge/highlight';
@@ -396,6 +398,13 @@ if (chromeMode === 'embed') {
   // Ctrl+S는 예외: embed 저장은 lidge 호스트 저장으로 보내므로 여기서 file:save를
   // 한 번만 dispatch하고 이후 전파를 막는다.
   document.addEventListener('keydown', (e) => {
+    const action = embedHostAction(e);
+    if (action && shouldForwardHostShortcut(e.target, !!document.querySelector('.modal-overlay')?.isConnected)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      requestLidgeHostAction(action);
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey
         && (e.key.toLowerCase() === 's' || e.key === 'ㄴ')) {
       e.preventDefault();
