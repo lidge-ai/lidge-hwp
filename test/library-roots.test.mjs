@@ -1,10 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rename, symlink, stat, rm, chmod, cp, utimes, open } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rename, symlink, stat, rm, chmod, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { execFile } from 'node:child_process';
-import { spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
 import { createServer } from '../server/index.mjs';
@@ -130,88 +129,42 @@ test('BUG-R1 separate registry instances preserve sequential and concurrent addi
   assert.deepEqual(new Set((await peer.list()).map(r => r.key)), expected);
 });
 
-test('BUG-R1 fresh registry lock returns ROOTS_BUSY and stale lock is replaced', async t => {
+test('BUG-R6 content hash conflict retries the mutation with a fresh snapshot', async t => {
   const f = await fixture(t);
   const next = join(f.root, 'next'); await mkdir(next);
-  const lock = join(f.stateDir, 'roots.json.lock');
-  await writeFile(lock, 'owner', { mode: 0o600 });
-  await assert.rejects(f.registry.register(next), { code: 'ROOTS_BUSY', status: 503 });
-  const stale = new Date(Date.now() - 31_000);
-  await utimes(lock, stale, stale);
-  await f.registry.register(next);
-  await assert.rejects(stat(lock), { code: 'ENOENT' });
-  assert.equal((await f.registry.list()).length, 2);
-});
-
-test('BUG-R4 live lock owner is never displaced, even when old', async t => {
-  const f = await fixture(t);
-  const next = join(f.root, 'next'); await mkdir(next);
-  const lock = join(f.stateDir, 'roots.json.lock');
-  const owner = { pid: process.pid, token: 'live-owner', at: Date.now() - 60_000 };
-  await writeFile(lock, JSON.stringify(owner), { mode: 0o600 });
-  const stale = new Date(Date.now() - 60_000); await utimes(lock, stale, stale);
-  const before = await readFile(join(f.stateDir, 'roots.json'));
-  const peer = await createRootsRegistry({ docsRoot: f.docs, stateDir: f.stateDir });
-  await assert.rejects(peer.register(next), { code: 'ROOTS_BUSY', status: 503 });
-  assert.deepEqual(await readFile(join(f.stateDir, 'roots.json')), before);
-  assert.deepEqual(JSON.parse(await readFile(lock, 'utf8')), owner);
-});
-
-test('BUG-R4 dead lock owner is recovered', async t => {
-  const f = await fixture(t);
-  const next = join(f.root, 'next'); await mkdir(next);
-  const child = spawnSync(process.execPath, ['-e', ''], { encoding: 'utf8' });
-  assert.equal(child.status, 0);
-  const lock = join(f.stateDir, 'roots.json.lock');
-  await writeFile(lock, JSON.stringify({ pid: child.pid, token: 'dead-owner', at: Date.now() }), { mode: 0o600 });
-  const peer = await createRootsRegistry({ docsRoot: f.docs, stateDir: f.stateDir });
-  await peer.register(next);
-  assert.equal((await peer.list()).length, 2);
-  await assert.rejects(stat(lock), { code: 'ENOENT' });
-});
-
-test('BUG-R4 release retains a lock whose token changed', async t => {
-  const f = await fixture(t);
-  const next = join(f.root, 'next'); await mkdir(next);
-  const state = await realpath(f.stateDir);
-  const lock = join(state, 'roots.json.lock');
-  let changed = false;
+  const file = join(await realpath(f.stateDir), 'roots.json');
+  let reads = 0;
   const peer = await createRootsRegistry({ docsRoot: f.docs, stateDir: f.stateDir, fsOps: {
-    rename: async (from, to) => {
-      await rename(from, to);
-      if (to === join(state, 'roots.json') && !changed) {
-        changed = true;
-        await writeFile(lock, JSON.stringify({ pid: process.pid, token: 'other-owner', at: Date.now() }));
-      }
+    readFile: async (path, ...args) => {
+      const bytes = await readFile(path, ...args);
+      if (path === file && ++reads === 3) return Buffer.concat([bytes, Buffer.from(' ')]);
+      return bytes;
     },
   } });
-  await peer.register(next);
-  assert.equal(JSON.parse(await readFile(lock, 'utf8')).token, 'other-owner');
+  const added = await peer.register(next);
+  assert.equal(reads, 5);
+  const disk = JSON.parse(await readFile(file, 'utf8'));
+  assert.deepEqual(new Set(disk.roots.map(r => r.key)), new Set([f.added.key, added.key]));
 });
 
-test('BUG-R4 close failure after lock create cleans up and allows retry', async t => {
+test('BUG-R6 persistent content hash conflict returns 409 without replacing roots.json', async t => {
   const f = await fixture(t);
   const next = join(f.root, 'next'); await mkdir(next);
-  const lock = join(await realpath(f.stateDir), 'roots.json.lock');
-  let failed = false;
+  const file = join(await realpath(f.stateDir), 'roots.json');
+  const before = await readFile(file);
+  let reads = 0;
   const peer = await createRootsRegistry({ docsRoot: f.docs, stateDir: f.stateDir, fsOps: {
-    open: async (path, ...args) => {
-      const handle = await open(path, ...args);
-      if (path === lock && !failed) {
-        failed = true;
-        return {
-          stat: () => handle.stat(),
-          writeFile: (...values) => handle.writeFile(...values),
-          close: async () => { await handle.close(); throw new Error('injected lock close failure'); },
-        };
-      }
-      return handle;
+    readFile: async (path, ...args) => {
+      const bytes = await readFile(path, ...args);
+      if (path === file && ++reads >= 3 && reads % 2 === 1)
+        return Buffer.concat([bytes, Buffer.from(' ')]);
+      return bytes;
     },
   } });
-  await assert.rejects(peer.register(next), /injected lock close failure/);
-  await assert.rejects(stat(lock), { code: 'ENOENT' });
-  await peer.register(next);
-  assert.equal((await peer.list()).length, 2);
+  await assert.rejects(peer.register(next), { code: 'ROOTS_CONFLICT', status: 409 });
+  assert.equal(reads, 9);
+  assert.deepEqual(await readFile(file), before);
+  assert.deepEqual((await readdir(f.stateDir)).filter(name => name.endsWith('.tmp')), []);
 });
 
 test('BUG-R4 library refreshes peer roots before synchronous lock and save', async t => {
@@ -229,6 +182,13 @@ test('BUG-R4 library refreshes peer roots before synchronous lock and save', asy
   assert.deepEqual(before.bytes, HWPX);
   await libA.writeAtomic(id, Buffer.concat([HWPX, Buffer.from('saved')]), before.sha256);
   assert.notDeepEqual(await readFile(join(next, 'peer.hwpx')), HWPX);
+});
+
+test('BUG-R6 synchronous lock rejects a root removed by another registry instance', async t => {
+  const f = await fixture(t);
+  const library = await createLibrary({ docsRoot: f.docs, stateDir: f.stateDir });
+  await f.registry.remove(f.added.key);
+  assert.throws(() => library.lock(f.id), { code: 'ROOT_NOT_FOUND', status: 404 });
 });
 
 test('external listing and opening exclude hidden and symlink paths', async t => {

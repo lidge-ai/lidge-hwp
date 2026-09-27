@@ -43,7 +43,7 @@ npm start
 | 설정 | 기본값 / 용도 |
 | --- | --- |
 | `LIDGE_HWP_DOCS` | 사용자 홈의 `.lidge-hwp/docs`, 독립된 문서함 Git 루트 |
-| `LIDGE_HWP_STATE_DIR` | 사용자 홈의 `.lidge-hwp`; 외부 루트 등록(`roots.json`)과 섀도 이력(`history/`) 위치. 테스트에서는 별도 임시 디렉터리로 지정한다. |
+| `LIDGE_HWP_STATE_DIR` | 사용자 홈의 `.lidge-hwp`; 외부 루트 등록(`roots.json`)과 섀도 이력(`history/`) 위치. 테스트에서는 별도 임시 디렉터리로 지정한다. 상태 폴더를 두 서버 프로세스가 동시에 쓰는 구성은 지원하지 않는다. |
 | `LIDGE_HWP_PORT` | `10500` |
 | `LIDGE_HWP_RHWP` | 이 저장소의 `rhwp/` |
 | `LIDGE_HWP_CARGO_TARGET` | 빌드에서 사용할 Cargo target 경로 |
