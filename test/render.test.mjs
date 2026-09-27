@@ -23,6 +23,19 @@ test('snapshot options: defaults, limits and unknown keys', () => {
   assert.equal(pageFile(0, 'png'), 'page-001.png');
 });
 
+test('save then reopen the same id and snapshot in one call (#4)', async t => {
+  const { root, agent } = await seed(t, { 'empty.hwpx': EMPTY });
+  const before = (await run('git', ['-C', root, 'rev-parse', 'HEAD'])).stdout.trim();
+  const out = await agent("const h=await hwp.open('empty.hwpx'); await hwp.insertText(h,{paragraph:0,text:'저장 후 스냅샷'}); await hwp.save(h); const again=await hwp.open('empty.hwpx'); const s=await hwp.snapshot(again,{png:false}); return {same:h===again, origin:s.origin, pages:s.pages.length};");
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.deepEqual(out.result, { same: true, origin: 'edited', pages: 1 });
+  assert.equal(out.saved.length, 1);
+  const after = (await run('git', ['-C', root, 'rev-parse', 'HEAD'])).stdout.trim();
+  assert.notEqual(after, before);
+  assert.equal(out.saved[0].commit, after);
+  await clean(root);
+});
+
 async function seed(t, files) {
   const root = await mkdtemp(join(tmpdir(), 'lidge-hwp-render-docs-'));
   const exportsRoot = await mkdtemp(join(tmpdir(), 'lidge-hwp-render-out-'));
