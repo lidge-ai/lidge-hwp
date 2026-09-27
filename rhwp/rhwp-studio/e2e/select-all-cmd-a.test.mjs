@@ -443,5 +443,39 @@ await runTest('⌘A 전체 선택 — 셀/글상자 범위 + 표 하이라이트
     assert((after.body[0] ?? '') === '', 'g: 본문도 비었음');
   }
 
+  // ── (s) 여러 쪽 문서에서 ⌘A는 스크롤 위치를 바꾸지 않는다 (맨 아래로 튀는 결함 회귀) ──
+  {
+    setTestCase('s-no-scroll-jump');
+    await createNewDocument(page);
+    await resetModes(page);
+    const pages = await page.evaluate(async () => {
+      const w = window.__wasm;
+      const nf = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      for (let i = 0; i < 150; i++) {
+        w.doc.insertText(0, i, 0, `LINE ${i}`);
+        w.doc.splitParagraph(0, i, String(`LINE ${i}`).length);
+      }
+      window.__canvasView?.loadDocument?.();
+      await nf(); await nf();
+      return w.pageCount ?? w.getPageCount?.();
+    });
+    await caretInBody(page);
+    const before = await page.evaluate(async () => {
+      const c = document.getElementById('scroll-container');
+      c.scrollTop = 0;
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return { top: c.scrollTop, max: c.scrollHeight - c.clientHeight };
+    });
+    assert(before.max > 500, `s: 스크롤할 만큼 긴 문서 (max ${before.max}, pages ${pages})`);
+    await key(page, { key: 'a', code: 'KeyA', meta: true });
+    await page.evaluate(settle);
+    const s = await selState(page);
+    const top = await page.evaluate(() => document.getElementById('scroll-container').scrollTop);
+    assert(s.hasSel === true, 's: 전체 선택됨');
+    assert(s.start.paragraphIndex === 0 && s.start.charOffset === 0, `s: 문서 시작부터 (실제 ${JSON.stringify(s.start)})`);
+    assert(s.end.paragraphIndex >= 150, `s: 문서 끝까지 (실제 ${JSON.stringify(s.end)})`);
+    assert(top === before.top, `s: 스크롤 위치 유지 (전 ${before.top}, 후 ${top})`);
+  }
+
   assert(pageErrors.length === 0, `pageerror 0건 (실제: ${JSON.stringify(pageErrors)})`);
 });
