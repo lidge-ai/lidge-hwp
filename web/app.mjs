@@ -109,14 +109,17 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
   }
   let next;
   const previous = current;
+  const previousShellState = shellState;
+  const previousInert = studio.element.inert;
   setShellState({ kind: 'opening', attemptedId: id });
   if (previous) {
     // 이전 문서를 먼저 정리한다. release()가 stopAgent()를 await하며,
     // AGENT_BUSY·LEASE_ISOLATED면 던지고 전환을 중단한다(선택 표시는 그대로 이전 문서).
     try { await release(previous); }
     catch (error) {
-      if (agent) throw error; // followSwitch가 inert를 전환 전 값(격리 탭이면 true)으로 되돌린다
-      setShellState({ kind: 'open' });
+      setShellState(previousShellState);
+      studio.element.inert = previousInert;
+      if (agent) throw error;
       say(`전환 취소: ${error.message}`);
       return false;
     }
@@ -242,7 +245,7 @@ let selectedGroupKey = null;
 let creating = false;
 let editing = null;
 let rendering = false;
-let pendingCancel = false;
+let pendingCancel = null;
 let searchTimer;
 for (const docList of [list, externalList]) docList.addEventListener('focusin', (event) => {
   const group = event.target?.closest?.('.group');
@@ -469,7 +472,7 @@ function focusEdit() {
 function cancelEdit(restoreFocus = false) {
   if (!editing || editing.pending) return;
   const old = editing;
-  editing = null; pendingCancel = false;
+  editing = null; pendingCancel = null;
   if (old.kind === 'new') {
     docFilter.value = old.previousFilter;
     if (old.wasCollapsed) collapsedGroups.add(old.groupKey);
@@ -490,14 +493,16 @@ function showEditError(code) {
 function editBlur(_event, input) {
   if (rendering || !editing || editing.pending) return;
   editing.draft = input.value;
-  pendingCancel = true;
+  const edit = editing;
+  pendingCancel = edit;
   setTimeout(() => {
-    if (pendingCancel && editing && !document.activeElement?.closest?.('.doc-row[data-edit]')) cancelEdit(false);
+    if (pendingCancel === edit && editing === edit
+      && !document.activeElement?.closest?.('.doc-row[data-edit]')) cancelEdit(false);
   }, 0);
 }
 function editKey(event, input) {
   if (!editing) return;
-  if (event.key === 'Tab') { pendingCancel = true; return; }
+  if (event.key === 'Tab') { pendingCancel = editing; return; }
   if (event.key === 'Escape' && !event.isComposing && !editing.composing && !editing.pending) {
     event.preventDefault(); event.stopPropagation(); cancelEdit(true); return;
   }
@@ -664,10 +669,14 @@ async function removeFolder(group) {
 
 newButton.addEventListener('click', beginNewDraft);
 document.addEventListener('pointerdown', event => {
-  if (editing && !editing.pending && !event.target.closest('.doc-row[data-edit]')) pendingCancel = true;
+  if (editing && !editing.pending && !event.target.closest('.doc-row[data-edit]')) pendingCancel = editing;
 }, true);
 document.addEventListener('click', () => {
-  if (pendingCancel) setTimeout(() => { if (pendingCancel) cancelEdit(false); }, 0);
+  const edit = pendingCancel;
+  if (edit) setTimeout(() => {
+    if (pendingCancel === edit && editing === edit) cancelEdit(false);
+    else if (pendingCancel === edit) pendingCancel = null;
+  }, 0);
 });
 
 projectAdd.addEventListener('click', () => {

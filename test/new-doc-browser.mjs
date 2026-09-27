@@ -20,6 +20,25 @@ await withBrowser({ files: ['P/a.hwp'] }, async ({ cdp, docs, server, scratch })
   await cdp.eval(`document.querySelector('.new-doc-row input').dispatchEvent(${key('Escape')});`);
   assert.equal(await cdp.eval(`return !!document.querySelector('.new-doc-row');`), false);
 
+  await cdp.eval(`document.querySelector('.doc[data-id="P/a.hwp"]').click();`);
+  await until(() => cdp.eval(`return document.querySelector('#filename').title === 'P/a.hwp';`));
+  await cdp.eval(`document.querySelector('.doc[data-id="P/a.hwp"]').focus();
+    document.dispatchEvent(${key('F2', "code: 'F2'")});`);
+  await until(() => cdp.eval(`return !!document.querySelector('.rename-input');`));
+  await cdp.eval(`const button = document.querySelector('#new-doc');
+    button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); button.click();`);
+  await cdp.eval(`await new Promise(resolve => setTimeout(resolve, 300));`);
+  assert.deepEqual(await cdp.eval(`return {
+    drafts: document.querySelectorAll('.new-doc-row').length,
+    renaming: !!document.querySelector('.rename-input'),
+  };`), { drafts: 1, renaming: false });
+  await cdp.eval(`const button = document.querySelector('#new-doc');
+    button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); button.click();`);
+  await cdp.eval(`await new Promise(resolve => setTimeout(resolve, 300));`);
+  assert.equal(await cdp.eval(`return document.querySelectorAll('.new-doc-row').length;`), 1);
+  await cdp.eval(`document.querySelector('.new-doc-row input').dispatchEvent(${key('Escape')});`);
+  console.log('PASS new document click replaces rename or draft with one persistent draft');
+
   const beforeIme = await cdp.eval(`return window.__posts;`);
   await cdp.eval(`document.querySelector('#new-doc').click(); const input = document.querySelector('.new-doc-row input');
     input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
@@ -162,6 +181,7 @@ await withBrowser({ files: ['P/a.hwp'] }, async ({ cdp, docs, server, scratch })
 });
 
 await withBrowser({}, async ({ cdp }) => {
+  await until(() => cdp.eval(`return document.body.dataset.studioReady === 'true';`));
   await cdp.eval(`document.querySelector('#new-doc').click();`);
   await until(() => cdp.eval(`return !!document.querySelector('.new-doc-row input');`));
   assert.equal(await cdp.eval(`return document.querySelector('.new-doc-row').closest('.group').querySelector('.group-header').dataset.group;`), '');
