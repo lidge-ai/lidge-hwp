@@ -71,6 +71,35 @@ test('library keeps base IDs and lists registered external IDs once', async t =>
   assert.deepEqual(Buffer.from(await opened.arrayBuffer()), HWPX);
 });
 
+test('BUG-R8 quarantine is recorded while an external root is unavailable', async t => {
+  const base = await mkdtemp(join(tmpdir(), 'lidge-roots-r8-'));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const docs = join(base, 'docs'), ext = join(base, 'ext'), state = join(base, 'state');
+  await Promise.all([mkdir(docs), mkdir(ext)]);
+  await writeFile(join(ext, 'a.hwpx'), HWPX);
+  await git('git', ['-C', docs, 'init', '-q']);
+  const lib = await createLibrary({ docsRoot: docs, stateDir: state });
+  const added = await lib.register(ext);
+  const id = `ext://${added.key}/a.hwpx`;
+  const token = lib.lock(id);
+  await rename(ext, ext + '.away');
+  // 롤백 도중 폴더가 사라진 상황: 격리 기록과 조회는 된다. 새 잠금은 거절한다.
+  assert.doesNotThrow(() => lib.quarantine(id, 'RECOVERY_FAILED'));
+  assert.equal(lib.isQuarantined(id), true);
+  assert.equal(lib.ownsLock(id, token), true);
+  assert.throws(() => lib.lock(id), /ROOT_UNAVAILABLE/);
+  // 폴더가 없는 채로 시작한 새 인스턴스: store가 없어도 격리는 보류됐다가 폴더가 돌아오면 옮겨진다.
+  const fresh = await createLibrary({ docsRoot: docs, stateDir: state });
+  assert.equal(fresh.isLocked(id), false);
+  fresh.quarantine(id, 'RECOVERY_FAILED');
+  assert.equal(fresh.isQuarantined(id), true);
+  await rename(ext + '.away', ext);
+  await fresh.roots();
+  assert.equal(fresh.isQuarantined(id), true);
+  assert.equal(lib.isQuarantined(id), true);
+  token.release();
+});
+
 test('BUG-R7 lock and quarantine survive a temporary external root disappearance', async t => {
   const base = await mkdtemp(join(tmpdir(), 'lidge-roots-r7-'));
   t.after(() => rm(base, { recursive: true, force: true }));
