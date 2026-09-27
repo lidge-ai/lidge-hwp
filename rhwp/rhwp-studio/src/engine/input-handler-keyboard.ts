@@ -69,6 +69,13 @@ function dispatchCellBlockGlobalShortcut(this: any, e: KeyboardEvent): boolean {
   const commandId = matchShortcut(e, defaultShortcuts);
   if (!commandId || !CELL_BLOCK_GLOBAL_COMMANDS.has(commandId)) return false;
   e.preventDefault();
+  if (commandId === 'edit:delete' && e.ctrlKey && !e.metaKey) {
+    if (!this.cursor.isProtectedCellSelectionMode()) {
+      this.clearSelectedCellBlock();
+      this.updateCellSelection();
+    }
+    return true;
+  }
   this.dispatcher.dispatch(commandId);
   return true;
 }
@@ -835,6 +842,13 @@ export function onKeyDown(this: any, e: KeyboardEvent): void {
       const cmdId = matchShortcut(e, defaultShortcuts);
       if (cmdId) {
         e.preventDefault();
+        if (cmdId === 'edit:delete' && this.cursor.isInCellSelectionMode() && e.ctrlKey && !e.metaKey) {
+          if (!this.cursor.isProtectedCellSelectionMode()) {
+            this.clearSelectedCellBlock();
+            this.updateCellSelection();
+          }
+          return;
+        }
         this.dispatcher.dispatch(cmdId);
         return;
       }

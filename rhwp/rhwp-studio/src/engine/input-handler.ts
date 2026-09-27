@@ -5674,12 +5674,12 @@ export class InputHandler {
         if (structural === 'rows') {
           for (let r = range.endRow; r >= range.startRow; r -= 1) {
             result = wasm.deleteTableRow(ctx.sec, ctx.ppi, ctx.ci, r);
-            if (!result?.ok) return pos;
+            if (!result?.ok) throw new Error('셀 블록 행 삭제 실패');
           }
         } else {
           for (let c = range.endCol; c >= range.startCol; c -= 1) {
             result = wasm.deleteTableColumn(ctx.sec, ctx.ppi, ctx.ci, c);
-            if (!result?.ok) return pos;
+            if (!result?.ok) throw new Error('셀 블록 열 삭제 실패');
           }
         }
         const corrected = result && clampedCellAfterDelete(

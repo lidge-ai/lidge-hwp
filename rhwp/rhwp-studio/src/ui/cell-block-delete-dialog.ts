@@ -22,6 +22,7 @@ class CellBlockDeleteDialog extends ModalDialog {
 
   protected createBody(): HTMLElement {
     const body = document.createElement('div');
+    body.id = 'cell-block-delete-description';
     body.style.padding = '16px 20px';
     body.style.lineHeight = '1.6';
     body.style.whiteSpace = 'pre-line';
@@ -42,6 +43,7 @@ class CellBlockDeleteDialog extends ModalDialog {
     super.show();
     this.dialog.setAttribute('role', 'alertdialog');
     this.dialog.setAttribute('aria-label', t('dialog.cellBlockDelete.title'));
+    this.dialog.setAttribute('aria-describedby', 'cell-block-delete-description');
 
     const footer = this.dialog.querySelector('.dialog-footer');
     const confirmBtn = footer?.querySelector('.dialog-btn-primary') as HTMLButtonElement | null;
@@ -64,6 +66,17 @@ class CellBlockDeleteDialog extends ModalDialog {
     const result = this.result;
     super.hide();
     this.settle(result);
+  }
+
+  protected override onTabKey(e: KeyboardEvent): boolean {
+    const buttons = [
+      ...this.dialog.querySelectorAll<HTMLButtonElement>('.dialog-footer button'),
+      this.dialog.querySelector<HTMLButtonElement>('.dialog-close'),
+    ].filter((button): button is HTMLButtonElement => button !== null);
+    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const next = (current + (e.shiftKey ? -1 : 1) + buttons.length) % buttons.length;
+    buttons[next]?.focus();
+    return true;
   }
 
   showAsync(): Promise<CellBlockDeleteAnswer> {

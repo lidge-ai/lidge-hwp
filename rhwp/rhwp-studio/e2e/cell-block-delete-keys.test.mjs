@@ -215,6 +215,43 @@ await runTest('셀 블록 지우기 키 — Backspace/Delete/⌘⌫/⌘E/⌘Dele
     assert(s.cellSel === true, 'h: 취소 — 셀 블록 유지');
   }
 
+  // ── (i) 대화상자 포커스 순환·설명 연결·Escape 취소 ──
+  {
+    const doc = await buildDoc(page);
+    await selectRow1(page, doc);
+    await key(page, { key: 'e', code: 'KeyE', meta: true });
+    assert(await dialogOpen(page), 'i: ⌘E 대화상자 표시');
+    const dialogState = () => page.evaluate(() => {
+      const dialog = document.querySelector('.modal-overlay .dialog-wrap');
+      const describedBy = dialog?.getAttribute('aria-describedby');
+      return {
+        focused: document.activeElement?.textContent?.trim(),
+        describedBy,
+        description: describedBy && document.getElementById(describedBy)?.textContent?.trim(),
+      };
+    });
+    const initial = await dialogState();
+    assert(initial.focused === '지우기', `i: 초기 포커스 [지우기] (실제 ${initial.focused})`);
+    assert(initial.description?.length > 0, 'i: aria-describedby가 본문 id를 가리킴');
+    for (const label of ['남김', '취소', '×', '지우기']) {
+      await page.keyboard.press('Tab');
+      const state = await dialogState();
+      assert(state.focused === label, `i: Tab → ${label} (실제 ${state.focused})`);
+    }
+    for (const label of ['×', '취소', '남김', '지우기']) {
+      await page.keyboard.down('Shift');
+      await page.keyboard.press('Tab');
+      await page.keyboard.up('Shift');
+      const state = await dialogState();
+      assert(state.focused === label, `i: Shift+Tab → ${label} (실제 ${state.focused})`);
+    }
+    await page.keyboard.press('Escape');
+    assert(await dialogOpen(page) === false, 'i: Escape가 대화상자를 닫음');
+    const s = await snapshot(page, doc);
+    assert(JSON.stringify(s.cells) === JSON.stringify(FULL) && s.dims?.rows === 3,
+      'i: Escape=취소, 내용과 행 수 유지');
+  }
+
   await screenshot(page, 'cell-block-delete-keys');
   assert(pageErrors.length === 0, `pageerror 0건 (실제: ${JSON.stringify(pageErrors.slice(0, 3))})`);
 });
