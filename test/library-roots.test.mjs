@@ -71,6 +71,31 @@ test('library keeps base IDs and lists registered external IDs once', async t =>
   assert.deepEqual(Buffer.from(await opened.arrayBuffer()), HWPX);
 });
 
+test('BUG-R7 lock and quarantine survive a temporary external root disappearance', async t => {
+  const base = await mkdtemp(join(tmpdir(), 'lidge-roots-r7-'));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const docs = join(base, 'docs'), ext = join(base, 'ext'), state = join(base, 'state');
+  await Promise.all([mkdir(docs), mkdir(ext)]);
+  await writeFile(join(ext, 'a.hwpx'), HWPX);
+  await git('git', ['-C', docs, 'init', '-q']);
+  const lib = await createLibrary({ docsRoot: docs, stateDir: state });
+  const added = await lib.register(ext);
+  const id = `ext://${added.key}/a.hwpx`;
+  const token = lib.lock(id);
+  assert.ok(token);
+  lib.quarantine(id, 'RECOVERY_FAILED');
+  assert.equal(lib.isQuarantined(id), true);
+  await rename(ext, ext + '.away');
+  assert.equal((await lib.roots()).find(r => r.key === added.key).available, false);
+  assert.throws(() => lib.lock(id), /ROOT_UNAVAILABLE/);
+  await rename(ext + '.away', ext);
+  assert.equal((await lib.roots()).find(r => r.key === added.key).available, true);
+  assert.equal(lib.lock(id), null, 'the original lock is still held after the folder came back');
+  assert.equal(lib.isQuarantined(id), true, 'quarantine survives the disappearance');
+  assert.equal(lib.ownsLock(id, token), true);
+  token.release();
+});
+
 test('external IDs survive server restart and missing root stays unavailable', async t => {
   const f = await fixture(t); const first = await f.start();
   const before = await (await fetch(first.base + '/api/docs')).json();
