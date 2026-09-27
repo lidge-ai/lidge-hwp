@@ -85,4 +85,3 @@ export async function seedBytes(t, bytes, id = 'a.hwp') {
   const disk = () => readFile(join(root, id));
   return { root, id, seedSha: sha256(bytes), seedHead, exec, head, disk };
 }
-

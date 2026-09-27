@@ -260,3 +260,57 @@ test('wp13 R4 findPage: next를 포함한 결과 전체를 예산 안에 넣고 
     assert.equal(seen.size, N); assert.ok(pages > 1);
   }
 });
+
+// ── wp13 C단계 리뷰(a2576ec) 반영 ──
+test('wp13 review: includeCells 검색에서 cellPath(중첩)·equationControl(수식) hit는 본문이 아니라 excluded로 센다', async t => {
+  const { scopedHits, findPage } = await ops();
+  const real = await openBytes(t, await buildDoc({ body: ['foo A'], table: { rows: 1, cols: 1 }, cells: { '0,0': 'foo c' } }));
+  // search_query.rs:436-459·796-818의 모양: 중첩 칸은 cellContext 없이 cellPath, 수식은 equationControl(칸 안이면 cellContext도).
+  const injected = [
+    { sec: 0, para: 1, charOffset: 0, length: 3, cellPath: [{ controlIndex: 0, cellIndex: 0, cellParaIndex: 0 }, { controlIndex: 0, cellIndex: 1, cellParaIndex: 0 }] },
+    { sec: 0, para: 0, charOffset: 2, length: 3, equationControl: 1 },
+    { sec: 0, para: 1, charOffset: 1, length: 3, cellContext: { parentPara: 1, ctrlIdx: 0, cellIdx: 0, cellPara: 0 }, equationControl: 0 },
+  ];
+  const doc = new Proxy(real, { get: (target, key) => key === 'searchAllText'
+    ? (q, cs, cells) => JSON.stringify([...JSON.parse(target.searchAllText(q, cs, cells)), ...(cells ? injected : [])]) // 엔진은 includeCells=false면 셋 다 거른다
+    : (typeof target[key] === 'function' ? target[key].bind(target) : target[key]) });
+  const all = scopedHits(doc, { query: 'foo', caseSensitive: true, scope: null, includeCells: true });
+  assert.deepEqual(all.hits, [{ section: 0, paragraph: 0, offset: 0, length: 3 }, { table: 0, row: 0, col: 0, cellParagraph: 0, offset: 0, length: 3 }]);
+  assert.equal(all.excluded, 3);
+  const cell = scopedHits(doc, { query: 'foo', caseSensitive: true, scope: { table: 0, row: 0, col: 0 }, includeCells: false });
+  assert.deepEqual(cell.hits, [{ table: 0, row: 0, col: 0, cellParagraph: 0, offset: 0, length: 3 }]);
+  const page = findPage(doc, { query: 'foo', includeCells: true, limit: 10 });
+  assert.equal(page.total, 2); assert.equal(page.excluded, 3);
+  assert.deepEqual(scopedHits(doc, { query: 'foo', caseSensitive: true, scope: null, includeCells: false }).hits, [{ section: 0, paragraph: 0, offset: 0, length: 3 }]);
+});
+
+test('wp13 review: splitLines·칸 치환 helper는 8 MiB 바이트 한도를 첫 편집 전에 전부 검사한다(경계 양쪽)', async t => {
+  const { MAX_BATCH_BYTES } = await import('../lib/api-registry.mjs');
+  const { insertTextHelper, setCellHelper } = await textHelpers();
+  const fixture = await buildDoc({ body: ['xy'], table: { rows: 1, cols: 2 }, cells: { '0,0': 'old', '0,1': 'foo foo' } });
+  // 실제로 쌓이는 바이트(성공 경로). 경계 시험은 같은 fixture의 새 사본에서 한다.
+  const measure = async fn => { const d = await openBytes(t, fixture), b = newBatch({}); fn(d, b); return { bytes: b.bytes, first: b.ops[0] }; };
+  const opBytes = op => Buffer.byteLength(JSON.stringify(op));
+  const cases = [
+    ['insertText splitLines', (d, b) => insertTextHelper(d, b, { paragraph: 0, text: 'a\nb', splitLines: true }), d => bodyParas(d)],
+    ['setCell splitLines', (d, b) => setCellHelper(d, b, { table: 0, row: 0, col: 0, text: 'A\nB', splitLines: true }), d => cellParas(d, 0, 0, 0)],
+    ['setCell format plain', (d, b) => setCellHelper(d, b, { table: 0, row: 0, col: 0, text: 'A', format: 'plain' }), d => cellParas(d, 0, 0, 0)],
+    ['replaceText cell scope', (d, b) => applyOp(d, b, 'replaceText', { find: 'foo', replace: 'X', scope: { table: 0, row: 0, col: 1 } }), d => cellParas(d, 0, 0, 1)],
+  ];
+  for (const [name, fn, read] of cases) await t.test(name, async () => {
+    const { bytes: need, first } = await measure(fn);
+    // 첫 op 하나는 들어가지만 전체는 못 들어가는 자리: 예전 코드는 첫 편집을 한 뒤 BATCH_TOO_LARGE였다.
+    const d = await openBytes(t, fixture), before = read(d), b = newBatch({});
+    b.bytes = MAX_BATCH_BYTES - opBytes(first) - 10;
+    assert.ok(need > opBytes(first) + 10, name);
+    assert.throws(() => fn(d, b), hasCode('BATCH_TOO_LARGE'), name);
+    assert.deepEqual(read(d), before, `${name}: document unchanged`);
+    assert.equal(b.ops.length, 0, name);
+    assert.equal(b.bytes, MAX_BATCH_BYTES - opBytes(first) - 10, `${name}: no bytes reserved`);
+    // 전체가 딱 들어가는 자리(+64바이트 여유 안)에서는 통과한다: 사전 계산이 실제 적재와 같거나 조금 크다.
+    const ok = await openBytes(t, fixture), b2 = newBatch({});
+    b2.bytes = MAX_BATCH_BYTES - need - 64;
+    fn(ok, b2);
+    assert.equal(b2.bytes, MAX_BATCH_BYTES - 64, name);
+  });
+});
