@@ -5593,7 +5593,10 @@ export class InputHandler {
     if (this.cursor.isInCellSelectionMode()) {
       // 셀 블록 지우기 (한컴 "지우기" ⌘E): 내용만 지우거나, 전체 줄/칸 블록이면
       // 구조 삭제 여부를 묻는다.
-      void this.deleteSelectedCellBlock();
+      // 부분 실패는 SnapshotCommand가 이미 복원했다. 여기서는 처리되지 않은 거부만 막는다.
+      void this.deleteSelectedCellBlock().catch((err) => {
+        console.warn('[InputHandler] 셀 블록 지우기 실패:', err);
+      });
       return;
     }
     if (this.cursor.hasSelection()) {
