@@ -9,6 +9,8 @@ import { apiHelp, REGISTRY, HELPERS } from '../../lib/api-registry.mjs';
 import { format, paraFormat, getFormat, styles, applyStyle } from '../../lib/format.mjs';
 import { selectAll } from '../../lib/scope.mjs';
 import { STRUCTURE } from '../../lib/structure.mjs';
+import { insertTextHelper, setCellHelper } from '../../lib/text-helpers.mjs';
+import { wireError } from './wire-error.mjs';
 import { renderDocument } from '../../lib/render.mjs';
 import { EXPORTS_ROOT, RHWP_BIN } from '../../lib/config.mjs';
 const MUTATE_HELPERS = { format, paraFormat, applyStyle, ...STRUCTURE };
@@ -179,7 +181,12 @@ export async function runAgent({ code, timeoutMs = 30000 },
       }
       return readApi(state.doc, method, rest); // 목록에 없으면 여기서 API_METHOD_DENIED
     }
-    if (['setCell','insertTextInCell','replaceText','setCheckbox','insertText'].includes(name)) {
+    if (name === 'setCell' || name === 'insertText') {
+      // splitLines(#28)·format(#30) 옵션을 기존 op로 풀어 쓴다(lib/text-helpers.mjs). 옵션이 없으면 applyOp와 같다.
+      if (state.save) throw new Error('mutation after save');
+      return (name === 'setCell' ? setCellHelper : insertTextHelper)(state.doc, state.batch, args[1]);
+    }
+    if (['insertTextInCell','replaceText','setCheckbox'].includes(name)) {
       if (state.save) throw new Error('mutation after save');
       return applyOp(state.doc, state.batch, name, args[1]);
     }
@@ -199,7 +206,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
         if (msg.type === 'call') {
           const task = hostSerial(msg.name, msg.args)
             .then(value => { if (!done) worker.postMessage({ type: 'reply', id: msg.id, value }); })
-            .catch(e => { if (!done) worker.postMessage({ type: 'reply', id: msg.id, error: String(e.message ?? e) }); });
+            .catch(e => { if (!done) worker.postMessage({ type: 'reply', id: msg.id, ...wireError(e) }); }); // code·details까지(R2-1)
           active.add(task); task.finally(() => active.delete(task)).catch(() => {});
         }
       });
@@ -282,7 +289,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
     const disk = state?.id ? await store.read(state.id).catch(() => null) : null;
     const commit = state?.id ? await historyFor(state.id)
       .then(history => lastCommit(history, state.id)).catch(() => null) : null;
-    return { ok: false, error: String(e.message ?? e), logs: [], elapsedMs: Date.now() - start,
+    return { ok: false, ...wireError(e), logs: [], elapsedMs: Date.now() - start,
       saved, reconciliation: { diskSha256: disk?.sha256 ?? null, lastCommit: commit }, ...(follow ? { follow } : {}) };
   } finally {
     closed = true; clearTimeout(timer);

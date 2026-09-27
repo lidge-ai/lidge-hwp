@@ -103,3 +103,80 @@ test('applyStyle: 이름·id로 본문과 칸에 적용되고, 모르는 이름�
   assert.throws(() => applyStyle(doc, newBatch({}), { paragraph: p }, '없는스타일'), code('API_ARGS_INVALID'));
   assert.equal(await sigAfterRoundtrip(doc), contentSignature(doc).digest);
 });
+
+// ── wp13 (#26 #30, 010 Revision 2). 공개 fixture, 새 함수는 동적 import ──
+import { buildDoc, openBytes, cellParas, cellChar, cellPara, bodyParas, GRAY } from './helpers/wp13-docs.mjs';
+const wp13Text = () => import('../lib/text-helpers.mjs');
+const DIST = ['spacingBefore', 'spacingAfter', 'indent', 'marginLeft', 'marginRight'];
+const pick = (o, keys) => Object.fromEntries(keys.map(k => [k, o[k]]));
+
+test('wp13 #26 paraFormat unit:pt 왕복: spacing 1x, indent/margin 2x HWPUNIT, getFormat unit:pt (본문·칸)', async t => {
+  const doc = await openBytes(t, await buildDoc({ body: ['ABCD'], table: { rows: 1, cols: 1 }, cells: { '0,0': '칸' } }));
+  const pt = { unit: 'pt', spacingBefore: 9, spacingAfter: 2, indent: 10, marginLeft: 10, marginRight: 10 };
+  const b = newBatch({});
+  paraFormat(doc, b, { paragraph: 0 }, pt);
+  assert.deepEqual(JSON.parse(b.ops[0].args.args[2]), { spacingBefore: 900, spacingAfter: 200, indent: 2000, marginLeft: 2000, marginRight: 2000 });
+  assert.deepEqual(pick(getFormat(doc, { paragraph: 0, unit: 'pt' }).para, DIST), { spacingBefore: 9, spacingAfter: 2, indent: 10, marginLeft: 10, marginRight: 10 });
+  assert.deepEqual(pick(getFormat(doc, { paragraph: 0 }).para, DIST), { spacingBefore: 12, spacingAfter: 2.7, indent: 13.3, marginLeft: 13.3, marginRight: 13.3 });
+  paraFormat(doc, newBatch({}), { table: 0, row: 0, col: 0 }, pt);
+  assert.deepEqual(pick(getFormat(doc, { table: 0, row: 0, col: 0, unit: 'pt' }).para, DIST), { spacingBefore: 9, spacingAfter: 2, indent: 10, marginLeft: 10, marginRight: 10 });
+  const neg = newBatch({});
+  paraFormat(doc, neg, { paragraph: 0 }, { unit: 'pt', indent: -5 });
+  assert.deepEqual(JSON.parse(neg.ops[0].args.args[2]), { indent: -1000 });
+  assert.throws(() => paraFormat(doc, newBatch({}), { paragraph: 0 }, { unit: 'px', indent: 1 }), code('API_ARGS_INVALID'));
+  assert.throws(() => paraFormat(doc, newBatch({}), { paragraph: 0 }, { unit: 'pt', marginLeft: -1 }), code('API_ARGS_INVALID'));
+  const raw = newBatch({}); paraFormat(doc, raw, { paragraph: 0 }, { spacingBefore: 300 }); // 생략 시 기존 raw 그대로
+  assert.deepEqual(JSON.parse(raw.ops[0].args.args[2]), { spacingBefore: 300 });
+});
+
+async function formatCells(t, opts = {}) {
+  return openBytes(t, await buildDoc({ body: ['본문'], table: { rows: 1, cols: 4 },
+    cells: { '0,0': '안내', '0,1': '안내', '0,2': '안내', '0,3': '안내' }, gray: ['0,0', '0,1', '0,2', '0,3'], ...opts }));
+}
+test('wp13 #30 setCell format: 기본·inherit는 안내 서식 상속, plain은 Normal 글자 모양, 객체는 지정값, 잘못된 값은 편집 전 거절', async t => {
+  const doc = await formatCells(t);
+  const { setCellHelper } = await wp13Text();
+  const paraBefore = cellPara(doc, 0, 0, 2);
+  const b = newBatch({});
+  setCellHelper(doc, b, { table: 0, row: 0, col: 0, text: '기본' });
+  setCellHelper(doc, b, { table: 0, row: 0, col: 1, text: '상속', format: 'inherit' });
+  setCellHelper(doc, b, { table: 0, row: 0, col: 2, text: '보통', format: 'plain' });
+  setCellHelper(doc, b, { table: 0, row: 0, col: 3, text: '지정', format: { italic: false, textColor: '#123456' } });
+  const check = d => {
+    for (const col of [0, 1]) assert.deepEqual(pick(cellChar(d, 0, 0, col), ['textColor', 'italic']), GRAY, `col ${col}`);
+    assert.deepEqual(pick(cellChar(d, 0, 0, 2), ['textColor', 'italic', 'bold', 'fontFamily', 'fontSize']),
+      { textColor: '#000000', italic: false, bold: false, fontFamily: '함초롬바탕', fontSize: 1000 });
+    assert.deepEqual(pick(cellChar(d, 0, 0, 3), ['textColor', 'italic']), { textColor: '#123456', italic: false });
+  };
+  check(doc);
+  assert.deepEqual(cellParas(doc, 0, 0, 2), ['보통']);
+  assert.deepEqual(cellPara(doc, 0, 0, 2), paraBefore);
+  assert.ok(b.ops.every(o => o.kind === 'setCell' || o.kind === 'call'));
+  assert.ok(b.ops.filter(o => o.kind === 'setCell').every(o => !('format' in o.args) && !('splitLines' in o.args)));
+  const again = await openDocument(exportWithReport(doc, 'hwp').bytes);
+  try { check(again); } finally { again.free(); }
+  for (const bad of [{ italic: 'no' }, { foo: 1 }, 'bogus', { fontName: '맑은 고딕', italic: 'x' }]) {
+    const bb = newBatch({});
+    assert.throws(() => setCellHelper(doc, bb, { table: 0, row: 0, col: 3, text: '새', format: bad }), code('API_ARGS_INVALID'), JSON.stringify(bad));
+    assert.equal(bb.ops.length, 0);
+    assert.deepEqual(cellParas(doc, 0, 0, 3), ['지정']);
+  }
+});
+
+test('wp13 #30 setCell plain: Normal(바탕글)이 없으면 PLAIN_STYLE_UNAVAILABLE, id 0 대체 없음, 칸·batch 불변', async t => {
+  const doc = await formatCells(t, { renameNormal: true });
+  const { setCellHelper } = await wp13Text();
+  assert.ok(styles(doc).some(s => s.id === 0 && s.englishName === 'BodyX'));
+  assert.ok(!styles(doc).some(s => s.englishName === 'Normal' || s.name === '바탕글'));
+  const b = newBatch({}), sig = contentSignature(doc).digest, charBefore = cellChar(doc, 0, 0, 0);
+  assert.throws(() => setCellHelper(doc, b, { table: 0, row: 0, col: 0, text: '실제', format: 'plain' }), e => {
+    assert.equal(e.code, 'PLAIN_STYLE_UNAVAILABLE');
+    assert.ok(e.details.styles.some(s => s.englishName === 'BodyX'));
+    return true;
+  });
+  assert.equal(b.ops.length, 0);
+  assert.deepEqual(cellParas(doc, 0, 0, 0), ['안내']);
+  assert.deepEqual(cellChar(doc, 0, 0, 0), charBefore);
+  assert.equal(contentSignature(doc).digest, sig);
+  assert.deepEqual(bodyParas(doc)[0], '본문');
+});

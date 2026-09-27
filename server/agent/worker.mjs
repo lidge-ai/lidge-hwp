@@ -1,5 +1,6 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import vm from 'node:vm';
+import { wireError } from './wire-error.mjs';
 const names = ['docs','open','help','selectAll','info','text','paragraphs','tables','cells','find','getFormat','styles','snapshot','exportPdf','api',
   'setCell','insertTextInCell','replaceText','setCheckbox','insertText','format','paraFormat','applyStyle',
   'insertParagraph','deleteParagraph','splitParagraph','mergeParagraph','deleteText','deleteRange','replaceAll',
@@ -9,7 +10,9 @@ parentPort.on('message', msg => {
   if (msg.type !== 'reply') return;
   const p = pending.get(msg.id); if (!p) return;
   pending.delete(msg.id);
-  msg.error ? p.reject(new Error(msg.error)) : p.resolve(msg.value);
+  // host 오류의 code·details를 되살린다. 코드가 잡아도 실패로 남고(아래 failures), 최종 out에 그대로 실린다.
+  msg.error ? p.reject(Object.assign(new Error(msg.error), msg.code ? { code: msg.code } : {},
+    msg.details !== undefined ? { details: msg.details } : {})) : p.resolve(msg.value);
 });
 function call(name, args) {
   if (pending.size >= 128) throw new Error('too many host calls');
@@ -40,5 +43,5 @@ try {
   parentPort.postMessage({ type: 'done', out: { ok: true,
     result: JSON.parse(serialized), logs } });
 } catch (error) {
-  parentPort.postMessage({ type: 'done', out: { ok: false, error: String(error?.message ?? error), logs } });
+  parentPort.postMessage({ type: 'done', out: { ok: false, ...wireError(error), logs } });
 }
