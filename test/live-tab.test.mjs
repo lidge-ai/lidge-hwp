@@ -10,8 +10,9 @@ import { promisify } from 'node:util';
 import { once } from 'node:events';
 import { createServer } from '../server/index.mjs';
 import { createTabs } from '../server/tabs.mjs';
-import { openDocument, exportWithReport } from '../lib/rhwp-node.mjs';
+import { openDocument, exportWithReport, rhwpModule } from '../lib/rhwp-node.mjs';
 import { applyOp, newBatch } from '../lib/ops.mjs';
+import { startAgentChannel } from '../web/agent-channel.mjs';
 const git = promisify(execFile);
 const HWP_STUB = Buffer.from('d0cf11e0a1b11ae100010203', 'hex');
 
@@ -22,7 +23,10 @@ async function seed(t, { id = 'a.hwp', bytes = HWP_STUB, agentConfig = {} } = {}
   await git('git', ['-C', root, 'init', '-q']);
   await git('git', ['-C', root, 'add', '--', id]);
   await git('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@local.invalid', 'commit', '-qm', 'seed']);
-  const server = await createServer({ docsRoot: root, agentConfig: { ...agentConfig, socketPath: join(root, 'agent.sock') } });
+  const stateDir = await mkdtemp(join(tmpdir(), 'lidge-hwp-state-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  const server = await createServer({ docsRoot: root, stateDir,
+    agentConfig: { ...agentConfig, socketPath: join(root, 'agent.sock') } });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   // SSE 연결이 열려 있으면 server.close()가 끝나지 않는다. 남은 연결을 닫아 'close'(tabs.close·socket.close)까지 가게 한다.
   t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
@@ -46,6 +50,93 @@ test('reply header의 bytesLength는 실제 이진 길이와 같아야 한다', 
   const frame = Buffer.concat([Buffer.from(JSON.stringify({ bytesLength: bytes.length }) + '\n'), bytes]);
   const split = frame.indexOf(10);
   assert.equal(frame.subarray(split + 1).length, JSON.parse(frame.subarray(0, split).toString('utf8')).bytesLength);
+});
+
+// wp2: 빌드된 WASM으로 만든 빈 HWP. HWP_STUB는 rhwp로 열리지 않으므로 탭 없는 디스크 경로 테스트에 쓴다.
+async function blankHwp() {
+  const { HwpDocument } = await rhwpModule();
+  const doc = HwpDocument.createEmpty();
+  try {
+    doc.createBlankDocument();
+    const exported = exportWithReport(doc, 'hwp');
+    assert.equal(exported.report.count, 0);
+    return Buffer.from(exported.bytes);
+  } finally { doc.free(); }
+}
+
+test('wp2: 같은 id 재open은 같은 핸들이고 한 번만 prepare/release한다', async t => {
+  const bytes = await blankHwp();
+  const { root, base, socketPath } = await seed(t, { bytes });
+  const lease = await claimLease(base);
+  const tab = await connectTab(t, base, lease);
+  const before = await head(root);
+  const run = runCode(socketPath, "const a=await hwp.open('a.hwp'); const b=await hwp.open('a.hwp'); return {same:a===b,handle:a}");
+  const prepare = await tab.frame('agent.prepare');
+  assert.equal((await tab.reply(prepare.requestId, { ok: true, state: tabState('hwp'),
+    diskSha256: sha(bytes), exportSha256: sha(bytes), contentLoss: noLoss('hwp') }, bytes)).status, 204);
+  const release = await tab.frame('agent.release');
+  assert.equal(release.token, prepare.requestId);
+  assert.equal((await tab.reply(release.requestId, { ok: true })).status, 204);
+  const out = await run;
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.result.same, true);
+  assert.equal(out.saved.length, 0);
+  assert.deepEqual(tab.seen.filter(x => x === 'agent.prepare' || x === 'agent.release'),
+    ['agent.prepare', 'agent.release']);
+  await unchanged(root, 'a.hwp', bytes, before);
+});
+
+test('wp2: 서로 다른 id와 첫 실패 뒤 재open은 거절하고 파일을 바꾸지 않는다', async t => {
+  const bytes = await blankHwp();
+  const { root, socketPath } = await seed(t, { bytes });
+  const before = await head(root);
+  const other = await runCode(socketPath, "const a=await hwp.open('a.hwp'); await hwp.open('other.hwp'); return a");
+  assert.equal(other.ok, false);
+  assert.match(other.error, /one document per invocation/);
+  const firstFailed = await runCode(socketPath, "try { await hwp.open('absent.hwp'); } catch {} try { await hwp.open('a.hwp'); } catch(e) { console.log('second:',e.message); }");
+  assert.equal(firstFailed.ok, false);
+  assert.match(firstFailed.error, /NOT_FOUND/);
+  assert.ok(firstFailed.logs.some(line => line.includes('second: one document per invocation')));
+  await unchanged(root, 'a.hwp', bytes, before);
+});
+
+test('wp2: Promise.all 재open은 직렬화되어 같은 핸들을 반환한다', async t => {
+  const bytes = await blankHwp();
+  const { socketPath } = await seed(t, { bytes });
+  const out = await runCode(socketPath, "const [a,b]=await Promise.all([hwp.open('a.hwp'),hwp.open('a.hwp')]); return a===b");
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.result, true);
+  assert.deepEqual(out.saved, []);
+});
+
+test('wp2: save 뒤 재open은 같은 핸들이고 mutation after save는 살아 있다', async t => {
+  const bytes = await blankHwp();
+  const { root, socketPath } = await seed(t, { bytes });
+  const before = await head(root);
+  const out = await runCode(socketPath, "const a=await hwp.open('a.hwp'); await hwp.save(a); const b=await hwp.open('a.hwp'); if(a!==b) throw Error('HANDLE_CHANGED'); await hwp.insertText(b,{paragraph:0,text:'blocked'});");
+  assert.equal(out.ok, false);
+  assert.match(out.error, /mutation after save/);
+  assert.deepEqual(out.saved, []);
+  await unchanged(root, 'a.hwp', bytes, before);
+});
+
+test('wp2: prepare 실패 뒤 같은 id 재open도 거절하고 prepare는 한 번뿐이다', async t => {
+  const bytes = await blankHwp();
+  const { root, base, socketPath } = await seed(t, { bytes });
+  const lease = await claimLease(base);
+  const tab = await connectTab(t, base, lease);
+  const before = await head(root);
+  const run = runCode(socketPath, "try { await hwp.open('a.hwp'); } catch (e) { console.log('first:', e.message); } try { await hwp.open('a.hwp'); } catch (e) { console.log('second:', e.message); }");
+  const prepare = await tab.frame('agent.prepare');
+  await tab.reply(prepare.requestId, { ok: false, error: { code: 'PREPARE_REFUSED', message: 'PREPARE_REFUSED' } });
+  const release = await tab.frame('agent.release');
+  assert.equal(release.token, prepare.requestId); // runner는 실패한 prepare의 requestId로 finally에서 release한다(runner.mjs:120,279)
+  await tab.reply(release.requestId, { ok: true });
+  const out = await run;
+  assert.equal(out.ok, false);
+  assert.ok(out.logs.some(line => line.includes('second: one document per invocation')), JSON.stringify(out.logs));
+  assert.equal(tab.seen.filter(x => x === 'agent.prepare').length, 1);
+  await unchanged(root, 'a.hwp', bytes, before);
 });
 
 test('tabs: 여는 중·살아 있음·없음을 구분한다', () => {
@@ -646,4 +737,267 @@ test('(T2) 마감까지 prepare 몫이 1초도 안 남으면 탭에 닿기 전�
     new Promise(resolve => setTimeout(resolve, 300, 'none'))]);
   assert.equal(seen, 'none');
   assert.equal(server.store.isLocked('a.hwp'), false); // prepareToken이 없으므로 open 실패 경로(runner.mjs:78)가 바로 풀었다
+});
+
+test('wp3 E1: 첫 호출의 두 번째 다른 open 실패는 apply 없이 release하고 바이트를 유지한다', async t => {
+  const bytes = await blankHwp();
+  const { root, base, socketPath } = await seed(t, { bytes });
+  const lease = await claimLease(base);
+  const tab = await connectTab(t, base, lease);
+  const before = await head(root);
+  const run = runCode(socketPath, "const h=await hwp.open('a.hwp'); await hwp.open('b.hwp'); await hwp.save(h)");
+  const prepare = await tab.frame('agent.prepare');
+  await tab.reply(prepare.requestId, { ok: true, state: tabState('hwp'), diskSha256: sha(bytes),
+    exportSha256: sha(bytes), contentLoss: noLoss('hwp') }, bytes);
+  const release = await tab.frame('agent.release');
+  assert.equal(release.token, prepare.requestId);
+  await tab.reply(release.requestId, { ok: true });
+  const out = await run;
+  assert.equal(out.ok, false);
+  assert.match(out.error, /one document per invocation/);
+  assert.deepEqual(out.saved, []);
+  assert.equal(tab.seen.includes('agent.apply'), false);
+  await unchanged(root, 'a.hwp', bytes, before);
+});
+
+test('wp3 E2: unrecovered apply reply는 원인과 격리를 서버 응답까지 보존한다', async t => {
+  const bytes = await blankHwp();
+  const { root, base, socketPath } = await seed(t, { bytes });
+  const lease = await claimLease(base);
+  const tab = await connectTab(t, base, lease);
+  const before = await head(root);
+  const run = runCode(socketPath, "const h=await hwp.open('a.hwp'); await hwp.insertText(h,{paragraph:0,text:'x'}); await hwp.save(h)");
+  const prepare = await tab.frame('agent.prepare');
+  await tab.reply(prepare.requestId, { ok: true, state: tabState('hwp'), diskSha256: sha(bytes),
+    exportSha256: sha(bytes), contentLoss: noLoss('hwp') }, bytes);
+  const apply = await tab.frame('agent.apply');
+  assert.equal(apply.token, prepare.requestId);
+  await tab.reply(apply.requestId, { ok: false, error: { code: 'APPLY_STATE_UNKNOWN',
+    message: 'APPLY_STATE_UNKNOWN: RPC_ERROR: transport dropped', recovered: null,
+    causeCode: 'RPC_ERROR', causeMessage: 'transport dropped' },
+    tab: { applied: false, committed: false, rollback: null, isolated: true } });
+  const release = await tab.frame('agent.release');
+  await tab.reply(release.requestId, { ok: true, tab: { isolated: true } });
+  const out = await run;
+  assert.equal(out.ok, false);
+  assert.match(out.error, /APPLY_STATE_UNKNOWN: RPC_ERROR: transport dropped/);
+  assert.deepEqual(out.saved, []);
+  assert.equal((await humanPut(base, root, 'a.hwp', lease)).status, 409);
+  const again = await runCode(socketPath, "await hwp.open('a.hwp')");
+  assert.equal(again.ok, false);
+  assert.match(again.error, /LEASE_ISOLATED/);
+  await unchanged(root, 'a.hwp', bytes, before);
+});
+
+const channelWait = async predicate => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.fail('agent channel response timeout');
+};
+
+const deferred = () => {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
+
+function sendChannelEvent(events, type, requestId, payload = {}) {
+  const event = new Event(type);
+  Object.defineProperty(event, 'data', { value: JSON.stringify({ schemaVersion: 1, type,
+    requestId, docId: 'a.hwp', leaseId: 'lease-1', ...payload }) });
+  events.dispatchEvent(event);
+}
+
+function channelHarness(t, { applyError, unlockError, replyGate, canFollow = async () => null,
+    onReply } = {}) {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const bytes = Uint8Array.of(1);
+  const events = new EventTarget();
+  const calls = [], replies = [], statuses = [], saveLocks = [];
+  let locked = false;
+  let inert = false;
+  const element = {
+    get inert() { return inert; },
+    set inert(value) { inert = value; calls.push(`inert=${value}`); },
+  };
+  const editor = {
+    element,
+    lidge: { request: async (method, params) => {
+      if (method === 'lockInput') {
+        calls.push(`lockInput:${params.on ? 'on' : 'off'}`);
+        if (!params.on && unlockError) throw unlockError;
+        locked = params.on;
+        return { locked };
+      }
+      if (method === 'exportWithReport') return { bytes, contentLoss: noLoss('hwp') };
+      if (method === 'applyOps') throw applyError;
+      throw new Error(`unexpected ${method}`);
+    } },
+    getDocumentState: async () => ({ documentSha256: sha(bytes) }),
+    loadFile: async () => { calls.push('loadFile'); },
+  };
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith('/api/docs/')) return { ok: true, arrayBuffer: async () => bytes.buffer };
+    assert.equal(init.method, 'POST');
+    const body = typeof init.body === 'string' ? init.body : await init.body.text();
+    const header = JSON.parse(body.split('\n')[0]);
+    calls.push('POST reply');
+    replies.push({ header, lockedAtReply: locked, inertAtReply: element.inert, saveLockedAtReply: saveLocks.at(-1) });
+    onReply?.(header);
+    if (replyGate && header.requestId === 'r') await replyGate.promise;
+    return { ok: true, status: 204 };
+  };
+  const stop = startAgentChannel({ editor, events, docId: 'a.hwp', lease: 'lease-1',
+    getDiskSha: () => sha(bytes), setDiskSha: () => {}, putDocument: async () => { throw new Error('unexpected PUT'); },
+    showStatus: value => statuses.push(value), setSaveLocked: value => {
+      calls.push(`saveLocked:${value}`); saveLocks.push(value);
+    }, canFollow });
+  const send = (type, id, payload) => sendChannelEvent(events, type, id, payload);
+  const prepare = async () => { send('agent.prepare', 'p', { format: 'hwp' }); await channelWait(() => replies.length === 1); };
+  return { send, prepare, calls, replies, statuses, saveLocks, editor, stop };
+}
+
+test('wp3 channel 1: ordinary release stays inert until unlock and reply confirmation', async t => {
+  const gate = deferred();
+  const f = channelHarness(t, { replyGate: gate });
+  await f.prepare();
+  f.calls.length = 0;
+  f.send('agent.release', 'r', { token: 'p' });
+  await channelWait(() => f.replies.length === 2);
+  assert.deepEqual(f.calls, ['inert=true', 'lockInput:off', 'POST reply']);
+  assert.equal(f.replies[1].saveLockedAtReply, true);
+  assert.equal(f.replies[1].inertAtReply, true);
+  assert.equal(f.editor.element.inert, true);
+  gate.resolve();
+  await channelWait(() => f.calls.includes('inert=false'));
+  assert.deepEqual(f.calls, ['inert=true', 'lockInput:off', 'POST reply', 'saveLocked:false', 'inert=false']);
+});
+
+test('wp3 channel 2: prepare waits for release acknowledgement', async t => {
+  const gate = deferred();
+  const f = channelHarness(t, { replyGate: gate });
+  await f.prepare();
+  f.send('agent.release', 'r', { token: 'p' });
+  await channelWait(() => f.replies.length === 2);
+  f.send('agent.prepare', 'p2', { format: 'hwp' });
+  assert.equal(f.calls.filter(value => value === 'lockInput:on').length, 1);
+  gate.resolve();
+  await channelWait(() => f.replies.length === 3);
+  assert.equal(f.replies[2].header.ok, true);
+  assert.equal(f.calls.filter(value => value === 'lockInput:on').length, 2);
+});
+
+test('wp3 channel 3: lost release response holds tab and queued prepare is isolated', async t => {
+  const gate = deferred();
+  const f = channelHarness(t, { replyGate: gate });
+  await f.prepare();
+  f.send('agent.release', 'r', { token: 'p' });
+  await channelWait(() => f.replies.length === 2);
+  f.send('agent.prepare', 'p2', { format: 'hwp' });
+  gate.reject(new Error('response lost'));
+  await channelWait(() => f.replies.length === 3);
+  assert.equal(f.replies[2].header.error.code, 'LEASE_ISOLATED');
+  assert.equal(f.editor.element.inert, true);
+  assert.equal(f.saveLocks.at(-1), true);
+  assert.equal(f.calls.at(-1), 'POST reply');
+  assert.ok(f.calls.includes('lockInput:on'));
+  assert.ok(f.statuses.some(value => value.includes('응답이 확인되지 않음')));
+});
+
+test('wp3 channel 4: unlock failure reports isolation and keeps Save locked', async t => {
+  const f = channelHarness(t, { unlockError: new Error('unlock failed') });
+  await f.prepare();
+  f.send('agent.release', 'r', { token: 'p' });
+  await channelWait(() => f.replies.length === 2);
+  assert.equal(f.replies[1].header.ok, true);
+  assert.equal(f.replies[1].header.tab.isolated, true);
+  assert.equal(f.saveLocks.includes(false), false);
+  assert.equal(f.editor.element.inert, true);
+});
+
+test('wp3 channel 5: reload unlocks before loadFile but remains inert through reply', async t => {
+  const gate = deferred();
+  const f = channelHarness(t, { replyGate: gate });
+  await f.prepare();
+  f.calls.length = 0;
+  f.send('agent.release', 'r', { token: 'p', reload: { diskSha256: 'a'.repeat(64), commit: 'abc' } });
+  await channelWait(() => f.replies.length === 2);
+  assert.deepEqual(f.calls, ['inert=true', 'lockInput:off', 'loadFile', 'POST reply']);
+  assert.equal(f.editor.element.inert, true);
+  gate.resolve();
+  await channelWait(() => f.editor.element.inert === false);
+  assert.deepEqual(f.calls.slice(-2), ['saveLocked:false', 'inert=false']);
+  assert.equal(f.calls.filter(value => value === 'lockInput:off').length, 1);
+});
+
+test('wp3 channel 5b: reload reply loss leaves iframe inert', async t => {
+  const gate = deferred();
+  const f = channelHarness(t, { replyGate: gate });
+  await f.prepare();
+  f.send('agent.release', 'r', { token: 'p', reload: { diskSha256: 'a'.repeat(64), commit: 'abc' } });
+  await channelWait(() => f.replies.length === 2);
+  gate.reject(new Error('response lost'));
+  await channelWait(() => f.statuses.some(value => value.includes('새로고침 필요')));
+  assert.equal(f.editor.element.inert, true);
+  assert.equal(f.saveLocks.at(-1), true);
+});
+
+test('wp3 channel 6: recovered false isolates and recovered true leaves tab usable', async t => {
+  for (const recovered of [false, true]) {
+    await t.test(`recovered=${recovered}`, async t => {
+      const f = channelHarness(t, { applyError: Object.assign(new Error('rollback failed'),
+        { code: 'ROLLBACK_FAILED', recovered }) });
+      await f.prepare();
+      f.send('agent.apply', 'a', { token: 'p', batch: { token: 'p' } });
+      await channelWait(() => f.replies.length === 2);
+      assert.equal(f.replies[1].header.error.code, recovered ? 'ROLLBACK_FAILED' : 'APPLY_STATE_UNKNOWN');
+      assert.equal(f.replies[1].header.tab.isolated, !recovered);
+      if (recovered) assert.equal(f.replies[1].header.error.recovered, true);
+      else assert.equal(f.replies[1].header.error.causeCode, 'ROLLBACK_FAILED');
+    });
+  }
+});
+
+test('wp3 channel 7: unmarked apply error keeps cause in reply and status', async t => {
+  const f = channelHarness(t, { applyError: new Error('transport dropped') });
+  await f.prepare();
+  f.send('agent.apply', 'a', { token: 'p', batch: { token: 'p' } });
+  await channelWait(() => f.replies.length === 2);
+  assert.deepEqual(f.replies[1].header.error, { code: 'APPLY_STATE_UNKNOWN',
+    message: 'APPLY_STATE_UNKNOWN: APPLY_OPS_ERROR: transport dropped', recovered: null,
+    causeCode: 'APPLY_OPS_ERROR', causeMessage: 'transport dropped' });
+  assert.ok(f.statuses.some(value => value.includes('APPLY_OPS_ERROR') && value.includes('transport dropped')));
+  assert.equal(f.replies[1].header.tab.isolated, true);
+});
+
+test('wp3 channel 7b: coded apply cause is preserved in reply', async t => {
+  const f = channelHarness(t, { applyError: Object.assign(new Error('transport dropped'), { code: 'RPC_ERROR' }) });
+  await f.prepare();
+  f.send('agent.apply', 'a', { token: 'p', batch: { token: 'p' } });
+  await channelWait(() => f.replies.length === 2);
+  assert.deepEqual(f.replies[1].header.error, { code: 'APPLY_STATE_UNKNOWN',
+    message: 'APPLY_STATE_UNKNOWN: RPC_ERROR: transport dropped', recovered: null,
+    causeCode: 'RPC_ERROR', causeMessage: 'transport dropped' });
+  assert.ok(f.statuses.some(value => value.includes('RPC_ERROR') && value.includes('transport dropped')));
+});
+
+test('wp3 channel 8: stop and follow stay busy until release reply is confirmed', async t => {
+  const gate = deferred();
+  const f = channelHarness(t, { replyGate: gate, canFollow: async () => null });
+  await f.prepare();
+  f.send('agent.release', 'r', { token: 'p' });
+  await channelWait(() => f.replies.length === 2);
+  await assert.rejects(f.stop, error => error.code === 'AGENT_BUSY');
+  f.send('agent.follow', 'f', { targetDocId: 'b.hwp', reservation: 'next' });
+  await channelWait(() => f.replies.length === 3);
+  assert.equal(f.replies[2].header.error.code, 'BUSY');
+  gate.resolve();
+  await channelWait(() => f.editor.element.inert === false);
+  await f.stop();
+  f.send('agent.follow', 'f2', { targetDocId: 'b.hwp', reservation: 'next' });
+  await channelWait(() => f.replies.length === 4);
+  assert.equal(f.replies[3].header.ok, true);
 });

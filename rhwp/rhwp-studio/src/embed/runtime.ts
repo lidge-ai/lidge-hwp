@@ -93,6 +93,7 @@ function bindPort(
       response.error = {
         code: 'UNSUPPORTED_CAPABILITY',
         message: `${requiredCapability} was not negotiated by the client.`,
+        ...(data.method === 'lidge.applyOps' ? { recovered: true } : {}),
       };
       postPortResponse(port, response);
       return;

@@ -19,13 +19,17 @@ test('API commits exact HWP and HWPX paths and rejects stale/lossy saves', async
   await writeFile(join(root, 'a.hwp'), HWP);
   await writeFile(join(root, 'b.hwpx'), HWPX);
   await run('git', ['-C', root, 'init', '-q']);
-  const server = await createServer({ docsRoot: root, startAgentSocket: null });
+  const stateDir = await mkdtemp(join(tmpdir(), 'lidge-hwp-state-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  const server = await createServer({ docsRoot: root, stateDir, startAgentSocket: null });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}`;
   const docs = await (await fetch(`${base}/api/docs`)).json();
   assert.deepEqual(docs.docs.map((d) => d.id), ['a.hwp', 'b.hwpx']);
+  assert.deepEqual(docs.roots, []);
+  assert.equal(docs.rootsWarning, null);
   for (const [id, format, original] of [['a.hwp', 'hwp', HWP], ['b.hwpx', 'hwpx', HWPX]]) {
     const get = await fetch(`${base}/api/docs/${id}`);
     assert.equal(get.status, 200);

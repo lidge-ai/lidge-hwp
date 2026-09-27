@@ -6,7 +6,7 @@
 
 ## 할 수 있는 일
 
-- 프로젝트별 문서 목록, 파일 가져오기, 접고 너비를 조절하는 사이드바
+- 프로젝트별 문서 목록과 파일 가져오기, Finder로 외부 폴더 추가·등록 해제, 접고 너비를 조절하는 사이드바
 - 문서명·저장을 한 줄에 배치한 편집기
 - 표 칸·본문 수정, 글자·문단 서식, 표·문단 구조 편집
 - 저장할 때 내용 손실 검사와 문서별 Git 커밋
@@ -38,13 +38,20 @@ npm start
 문서함은 독립된 Git 저장소여야 한다. 저장하면 상태줄에 커밋 ID가 표시된다.
 서버 재시작 전에는 편집을 저장하고, 재시작 후에는 문서를 다시 연다.
 
+사이드바의 ‘추가한 폴더’에서 Finder로 HWP/HWPX 폴더를 등록할 수 있다. 등록 해제는 목록에서만 제거하며 원본 파일과 이력은 남긴다. 선택한 폴더의 Git 이력은 ~/.lidge-hwp/history/<루트 UUID>에 따로 보관하고, 폴더 안에 .git를 만들지 않는다. 폴더가 사라지면 ‘찾을 수 없음’으로 표시하며 등록은 유지한다.
+
+기존 문서함 외에 등록한 폴더의 HWP·HWPX도 열 수 있다. 외부 문서 ID는 `ext://<UUID>/<상대경로>`이고, 등록 목록은 `~/.lidge-hwp/roots.json`에 저장된다. 외부 문서의 Git 이력은 원본 폴더가 아닌 `~/.lidge-hwp/history/<UUID>/`에 남는다. 폴더가 이동하거나 사라지면 등록은 유지되고 API에서 `available:false`로 표시된다. 이력 보존 기간은 사용자가 결정해야 한다.
+
 | 설정 | 기본값 / 용도 |
 | --- | --- |
 | `LIDGE_HWP_DOCS` | 사용자 홈의 `.lidge-hwp/docs`, 독립된 문서함 Git 루트 |
+| `LIDGE_HWP_STATE_DIR` | 사용자 홈의 `.lidge-hwp`; 외부 루트 등록(`roots.json`)과 섀도 이력(`history/`) 위치. 테스트에서는 별도 임시 디렉터리로 지정한다. 상태 폴더를 두 서버 프로세스가 동시에 쓰는 구성은 지원하지 않는다. |
 | `LIDGE_HWP_PORT` | `10500` |
 | `LIDGE_HWP_RHWP` | 이 저장소의 `rhwp/` |
 | `LIDGE_HWP_CARGO_TARGET` | 빌드에서 사용할 Cargo target 경로 |
 | `LIDGE_HWP_NODE_BIN` | Node가 든 디렉터리, 생략하면 PATH 사용 |
+| `LIDGE_HWP_EXPORTS` | 사용자 홈의 `.lidge-hwp/exports`, `hwp.snapshot`·`hwp.exportPdf` 결과 위치(문서함 밖이어야 함) |
+| `LIDGE_HWP_RHWP_BIN` | 이 저장소의 `bin/rhwp`, PDF 렌더에 쓸 rhwp CLI |
 
 서버를 인터넷에 노출하거나 다른 사용자와 공유하는 서비스로 운영하지 않는다.
 저장한 문서가 Git 기록에 남으므로 문서함을 공개 저장소로 push하지 않는다.
@@ -79,10 +86,16 @@ await hwp.save(h);
 return { edited: true };
 ```
 
+`hwp.docs()`는 기본 문서와 등록한 외부 폴더의 문서를 함께 반환한다. 외부 문서는 `hwp.open('ext://<UUID>/example.hwpx')`처럼 열며, 같은 호출의 저장 결과에도 이 ID가 유지된다.
+
 `await hwp.help()`에서 전체 API와 허용된 저수준 `hwp.api()` 메서드를 확인한다.
 `setCell`, `insertText`, `replaceAll`, `splitParagraph`, `createTable`, `insertRow`,
 `mergeCells`, `getFormat`, `styles` 등을 제공한다. 좌표는 0부터 시작하며 구조를 바꾸면
 다시 읽어야 한다. 한 번의 저장은 편집 호출 4,096개·8MB까지다.
+
+한 호출에서는 문서 하나만 연다. 같은 문서 ID로 `hwp.open(id)`를 다시 부르면 기존 핸들을 돌려주므로
+저장한 뒤 이어서 `hwp.snapshot`을 찍을 수 있다. 다른 문서를 열거나 첫 열기가 실패한 뒤 다시 여는 것은
+거절한다. `hwp.save(h)` 뒤에는 다시 열어도 변경 호출이 거절된다.
 
 전체 선택은 본문, 최상위 표 칸, 한 겹 중첩 표 칸의 글자 서식을 다룬다.
 머리말·꼬리말·각주와 두 겹 이상 중첩 표는 제외된다. 중첩 칸의 문단 서식·스타일은
@@ -91,6 +104,23 @@ return { edited: true };
 열린 문서에는 편집기에서도 같은 변경을 재생한다. 다른 문서로 전환할 때 미저장 편집이
 있으면 자동 전환을 거절한다. 저장 바이트가 기대한 내용과 다르면
 `AGENT_VERIFY_MISMATCH`로 거절한다. `kordoc` 보조 저장은 표 칸 쓰기만 지원한다.
+
+열린 탭에 AI 변경을 적용할 때 applyOps가 적용 여부를 확정하지 못하면 MCP 응답에 APPLY_STATE_UNKNOWN과 원래 오류 코드·메시지를 담고 탭을 격리한다. 격리된 탭은 저장·후속 에이전트 호출을 거절하며 새로고침으로 새 임대를 받아야 한다. 편집 전으로 확인된 거절은 recovered:true로 보고하고 격리하지 않는다.
+
+### 쪽 스냅샷과 PDF
+
+편집 결과를 눈으로 확인할 때 브라우저 화면을 찍을 필요가 없다. 번들 rhwp CLI가 문서를 바로 PDF로 그린다.
+
+```js
+const h = await hwp.open('demo/example.hwpx');
+const s = await hwp.snapshot(h);          // 모든 쪽: 쪽마다 PDF + PNG
+const p = await hwp.exportPdf(h);         // 문서 전체 PDF 한 파일
+return { dir: s.dir, pages: s.pages.length, pdf: p.path };
+```
+
+`snapshot(h, { pages, png, pdf, maxPx })`에서 `pages`는 0부터 센 쪽 번호 배열이다(생략하면 전체, 한 번에 200쪽까지).
+PNG는 macOS `sips`로 만들고 긴 변 `maxPx`(기본 1600)에 맞춘다. 결과는 기본 문서의 경우 `~/.lidge-hwp/exports/<문서 ID>/<시각>-<해시>/`, 외부 문서의 경우 `~/.lidge-hwp/exports/external/<UUID>/<상대경로>/<시각>-<해시>/`에 남는다. 출력 위치는 등록된 어느 문서 루트 안에도 둘 수 없다. 응답에는 경로만 담긴다. 같은 호출에서 저장 전에 고친 내용도 그대로 그린다(`origin: 'edited'`).
+쪽마다 0.3초 정도 걸리므로 긴 문서는 `timeoutMs`를 늘린다. 쪽 나눔은 CLI 조판을 따르므로 편집기와 조금 다를 수 있다.
 
 ### Aside
 
@@ -136,6 +166,17 @@ Rust를 바꿨다면 WASM·Studio와 CLI를 함께 빌드해야 한다.
 설정하지 않은 통합 테스트는 skip된다. 개인 문서·기록은 공개본에 포함하지 않는다.
 vendored 엔진의 전체 회귀 테스트에 필요한 일부 원본 문서도 제외되어 있으므로,
 엔진 전체 테스트를 실행하려면 배포 권한이 있는 별도 fixture를 준비해야 한다.
+
+GitHub Actions CI는 push와 PR에서 자동으로 돌지 않는다. 필요할 때 브랜치를 지정해 직접 실행한다.
+
+```sh
+run_url=$(gh workflow run ci.yml --ref <branch>)   # 방금 만든 실행의 URL을 출력한다
+gh run watch "${run_url##*/}" --exit-status
+```
+
+CI는 WASM·Studio를 한 번 빌드해 `build/`를 넘기고, 테스트를 세 샤드로 나눠 macOS arm64에서 돌린다.
+빌드가 필요 없는 메타데이터·셸 문법 검사는 따로 돈다. 마지막 `ci` 잡이 모든 잡의 성공을 확인한다.
+로컬에서 같은 샤드를 재현하려면 `node --test --test-shard=1/3 test/*.test.mjs`처럼 실행한다(1/3, 2/3, 3/3).
 
 - [기여 안내](CONTRIBUTING.md)
 - [보안 안내](SECURITY.md)

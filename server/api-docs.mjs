@@ -21,10 +21,37 @@ async function body(req, maxBytes) {
   return Buffer.concat(chunks);
 }
 
-export function createDocsApi({ store, tabs }) {
+export function createDocsApi({ store, tabs, pickFolder }) {
+  let pickInFlight = false;
   async function handle(req, res, pathname) {
+    if (pathname === '/api/roots/pick') {
+      if (req.method !== 'POST') { error(res, 405, 'METHOD_NOT_ALLOWED'); return true; }
+      if (pickInFlight) { error(res, 409, 'PICK_IN_PROGRESS'); return true; }
+      pickInFlight = true;
+      try {
+        const path = await pickFolder();
+        if (path === null) { res.writeHead(204, { 'Cache-Control': 'no-store' }); res.end(); return true; }
+        if (typeof path !== 'string' || !path) { error(res, 500, 'PICK_FAILED'); return true; }
+        send(res, 201, { root: await store.register(path) });
+      } catch (cause) { error(res, cause.status || 500, cause.code || 'PICK_FAILED'); }
+      finally { pickInFlight = false; }
+      return true;
+    }
+    if (pathname.startsWith('/api/roots/')) {
+      if (req.method !== 'DELETE') { error(res, 405, 'METHOD_NOT_ALLOWED'); return true; }
+      let key;
+      try { key = decodeURIComponent(pathname.slice('/api/roots/'.length)); }
+      catch { error(res, 400, 'INVALID_ROOT_KEY'); return true; }
+      try {
+        const result = await store.remove(key, candidate => tabs.hasRootActivity(candidate));
+        send(res, 200, { removed: key, ...result });
+      } catch (cause) { error(res, cause.status || 500, cause.code || 'REMOVE_FAILED'); }
+      return true;
+    }
     if (pathname === '/api/docs' && req.method === 'GET') {
-      send(res, 200, { docs: await store.list(), projects: await store.listProjects() });
+      const roots = await store.roots();
+      send(res, 200, { docs: await store.list(), projects: await store.listProjects(),
+        roots, rootsWarning: roots.warning });
       return true;
     }
     if (pathname === '/api/projects') {
@@ -47,9 +74,9 @@ export function createDocsApi({ store, tabs }) {
         const fileName = decodeURIComponent(req.headers['x-file-name'] || '');
         // 커밋과 실패 복구는 docstore가 문서 잠금을 쥔 채로 부른다. 복구가 확인되지 않으면 RECOVERY_FAILED(격리).
         const imported = await store.importDocument(project, fileName, await body(req, 32 * 1024 * 1024), {
-          commit: (id) => commitFile(store.root, id, `Add ${id}`),
-          indexSnapshot: (id) => indexEntry(store.root, id),
-          indexRestore: (id, before) => restoreIndex(store.root, id, before),
+          commit: (id) => commitFile({ workTree: store.root, gitDir: null, path: id }, id, `Add ${id}`),
+          indexSnapshot: (id) => indexEntry({ workTree: store.root, gitDir: null, path: id }, id),
+          indexRestore: (id, before) => restoreIndex({ workTree: store.root, gitDir: null, path: id }, id, before),
         });
         send(res, 201, imported);
       } catch (cause) { error(res, cause.status || 500, cause.code || 'IMPORT_FAILED'); }
