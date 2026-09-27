@@ -45,6 +45,8 @@ npm start
 | `LIDGE_HWP_RHWP` | 이 저장소의 `rhwp/` |
 | `LIDGE_HWP_CARGO_TARGET` | 빌드에서 사용할 Cargo target 경로 |
 | `LIDGE_HWP_NODE_BIN` | Node가 든 디렉터리, 생략하면 PATH 사용 |
+| `LIDGE_HWP_EXPORTS` | 사용자 홈의 `.lidge-hwp/exports`, `hwp.snapshot`·`hwp.exportPdf` 결과 위치(문서함 밖이어야 함) |
+| `LIDGE_HWP_RHWP_BIN` | 이 저장소의 `bin/rhwp`, PDF 렌더에 쓸 rhwp CLI |
 
 서버를 인터넷에 노출하거나 다른 사용자와 공유하는 서비스로 운영하지 않는다.
 저장한 문서가 Git 기록에 남으므로 문서함을 공개 저장소로 push하지 않는다.
@@ -92,6 +94,23 @@ return { edited: true };
 있으면 자동 전환을 거절한다. 저장 바이트가 기대한 내용과 다르면
 `AGENT_VERIFY_MISMATCH`로 거절한다. `kordoc` 보조 저장은 표 칸 쓰기만 지원한다.
 
+### 쪽 스냅샷과 PDF
+
+편집 결과를 눈으로 확인할 때 브라우저 화면을 찍을 필요가 없다. 번들 rhwp CLI가 문서를 바로 PDF로 그린다.
+
+```js
+const h = await hwp.open('demo/example.hwpx');
+const s = await hwp.snapshot(h);          // 모든 쪽: 쪽마다 PDF + PNG
+const p = await hwp.exportPdf(h);         // 문서 전체 PDF 한 파일
+return { dir: s.dir, pages: s.pages.length, pdf: p.path };
+```
+
+`snapshot(h, { pages, png, pdf, maxPx })`에서 `pages`는 0부터 센 쪽 번호 배열이다(생략하면 전체, 한 번에 200쪽까지).
+PNG는 macOS `sips`로 만들고 긴 변 `maxPx`(기본 1600)에 맞춘다. 결과는
+`~/.lidge-hwp/exports/<문서 ID>/<시각>-<해시>/`에 `page-001.pdf`, `page-001.png`, `document.pdf`로 남고,
+응답에는 경로만 담긴다. 같은 호출에서 저장 전에 고친 내용도 그대로 그린다(`origin: 'edited'`).
+쪽마다 0.3초 정도 걸리므로 긴 문서는 `timeoutMs`를 늘린다. 쪽 나눔은 CLI 조판을 따르므로 편집기와 조금 다를 수 있다.
+
 ### Aside
 
 Aside CLI를 설치하고 로그인한 뒤 원하는 계정을 명시한다. 먼저 dry-run으로 확인한다.
@@ -136,6 +155,17 @@ Rust를 바꿨다면 WASM·Studio와 CLI를 함께 빌드해야 한다.
 설정하지 않은 통합 테스트는 skip된다. 개인 문서·기록은 공개본에 포함하지 않는다.
 vendored 엔진의 전체 회귀 테스트에 필요한 일부 원본 문서도 제외되어 있으므로,
 엔진 전체 테스트를 실행하려면 배포 권한이 있는 별도 fixture를 준비해야 한다.
+
+GitHub Actions CI는 push와 PR에서 자동으로 돌지 않는다. 필요할 때 브랜치를 지정해 직접 실행한다.
+
+```sh
+run_url=$(gh workflow run ci.yml --ref <branch>)   # 방금 만든 실행의 URL을 출력한다
+gh run watch "${run_url##*/}" --exit-status
+```
+
+CI는 WASM·Studio를 한 번 빌드해 `build/`를 넘기고, 테스트를 세 샤드로 나눠 macOS arm64에서 돌린다.
+빌드가 필요 없는 메타데이터·셸 문법 검사는 따로 돈다. 마지막 `ci` 잡이 모든 잡의 성공을 확인한다.
+로컬에서 같은 샤드를 재현하려면 `node --test --test-shard=1/3 test/*.test.mjs`처럼 실행한다(1/3, 2/3, 3/3).
 
 - [기여 안내](CONTRIBUTING.md)
 - [보안 안내](SECURITY.md)

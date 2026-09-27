@@ -1,18 +1,114 @@
 name: App checks
 
+# 수동 실행 전용이다. push·pull_request로는 돌지 않는다.
+#   gh workflow run ci.yml --ref <branch>
+# 수동 실행은 특정 커밋에 대한 증거 요청이라, 같은 브랜치의 다른 실행이 이를 취소하지 않도록
+# concurrency 그룹을 run_id로 잡는다(한 실행 = 한 그룹).
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: app-checks-${{ github.run_id }}
+  cancel-in-progress: false
+
 jobs:
-  app:
-    runs-on: macos-latest
+  # WASM·Studio 빌드는 비싸다(macOS 러너 약 8분). 한 번만 빌드하고 build/를 샤드에 나눠 준다.
+  build:
+    name: build
+    runs-on: macos-15
     timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Require arm64 (bin/rhwp is darwin-arm64)
+        run: test "$(uname -m)" = arm64
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '26'
+      - name: Cache npm downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json', 'rhwp/rhwp-studio/package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Cache cargo registry and rhwp target
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rhwp/target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rhwp/Cargo.lock', 'rhwp/rust-toolchain.toml') }}
+          restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
+      - run: npm ci
+      - name: Install pinned wasm-pack
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/wasm-pack.tar.gz"
+          curl --fail --location --retry 3 \
+            "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-aarch64-apple-darwin.tar.gz" \
+            --output "$archive"
+          printf '%s  %s\n' 0abff4a03d670b6c00ea31d0e1608a72407e355f3d3765e9c30eb45cd5b7e318 "$archive" | shasum -a 256 --check -
+          mkdir -p "$RUNNER_TEMP/wasm-pack"
+          tar -xzf "$archive" --strip-components=1 -C "$RUNNER_TEMP/wasm-pack"
+          echo "$RUNNER_TEMP/wasm-pack" >> "$GITHUB_PATH"
+      - name: Prepare pinned Rust toolchain
+        working-directory: rhwp
+        run: rustup show
+      - name: Build WASM and Studio
+        run: npm run build:studio
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: studio-build
+          path: build/
+          retention-days: 3
+          if-no-files-found: error
+
+  # node --test --test-shard=N/3 은 파일 목록을 정렬해 나눈다. 세 샤드의 합이 전체 스위트다.
+  # render 테스트가 bin/rhwp(darwin-arm64)와 /usr/bin/sips를 쓰므로 macOS arm64에서 돈다.
+  test:
+    name: test ${{ matrix.shard }}/3
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Require arm64 (bin/rhwp is darwin-arm64)
+        run: test "$(uname -m)" = arm64
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '26'
+      - name: Cache npm downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json', 'rhwp/rhwp-studio/package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-${{ runner.arch }}-
+      - run: npm ci
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: studio-build
+          path: build
+      - name: Check build artifact
+        run: test -s build/wasm/rhwp_bg.wasm && test -s build/wasm/rhwp.js && test -s build/studio/index.html && test -s build/editor/index.js
+      - name: Tests (shard ${{ matrix.shard }}/3)
+        # 비공개 문서 픽스처 테스트는 배포하지 않으므로 skipped로 보고된다.
+        run: node --test --test-shard=${{ matrix.shard }}/3 test/*.test.mjs
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -20,40 +116,22 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '26'
-          cache: npm
-      - run: npm ci
-      - name: Install pinned wasm-pack
-        shell: bash
-        run: |
-          case "$(uname -m)" in
-            arm64)
-              target=aarch64-apple-darwin
-              checksum=0abff4a03d670b6c00ea31d0e1608a72407e355f3d3765e9c30eb45cd5b7e318
-              ;;
-            x86_64)
-              target=x86_64-apple-darwin
-              checksum=d3f1a4a33e95f8f0d7801b024e08624c479999ac96aa150908b2394015cd0363
-              ;;
-            *) exit 1 ;;
-          esac
-          archive="$RUNNER_TEMP/wasm-pack.tar.gz"
-          curl --fail --location --retry 3 \
-            "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-$target.tar.gz" \
-            --output "$archive"
-          printf '%s  %s\n' "$checksum" "$archive" | shasum -a 256 --check -
-          mkdir -p "$RUNNER_TEMP/wasm-pack"
-          tar -xzf "$archive" --strip-components=1 -C "$RUNNER_TEMP/wasm-pack"
-          echo "$RUNNER_TEMP/wasm-pack" >> "$GITHUB_PATH"
-      - name: Prepare pinned Rust toolchain
-        working-directory: rhwp
-        run: rustup show
-      - name: Build WASM and Studio required by app tests
-        run: npm run build:studio
-      - name: Public unit and contract tests
-        # Private document integration fixtures are intentionally not distributed.
-        # The test runner reports those as skipped; this job is not the full integration gate.
-        run: npm test
       - name: Embedded metadata privacy
         run: node scripts/sanitize-rhwp-metadata.mjs --root rhwp --check
       - name: Shell syntax
-        run: sh -n scripts/build-studio.sh scripts/build-rhwp-cli.sh scripts/rhwp-vendor.sh
+        run: for f in scripts/*.sh; do sh -n "$f"; done
+
+  # 한 줄 판정. 선행 잡 중 하나라도 success가 아니면(failure·cancelled·skipped 포함) 실패한다.
+  ci:
+    name: ci
+    if: always()
+    needs: [build, test, lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every job to succeed
+        env:
+          RESULTS: ${{ needs.build.result }} ${{ needs.test.result }} ${{ needs.lint.result }}
+        run: |
+          echo "build test lint: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || exit 1; done

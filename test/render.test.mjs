@@ -1,0 +1,100 @@
+import test from 'node:test'; import assert from 'node:assert/strict';
+import { mkdtemp, cp, readFile, readdir, rm, access, realpath } from 'node:fs/promises';
+import { tmpdir } from 'node:os'; import { join, basename } from 'node:path';
+import { execFile } from 'node:child_process'; import { promisify } from 'node:util';
+import { createDocStore } from '../lib/docstore.mjs';
+import { createTabs } from '../server/tabs.mjs';
+import { checkSnapshotOptions, stampName, pageFile } from '../lib/render.mjs';
+import { ROOT } from '../lib/config.mjs';
+const run = promisify(execFile);
+const SAMPLES = join(ROOT, 'rhwp', 'samples');
+const PDF = Buffer.from('%PDF-'), PNG = Buffer.from('89504e470d0a1a0a', 'hex');
+const startsWith = async (file, magic) => (await readFile(file)).subarray(0, magic.length).equals(magic);
+const EMPTY = join('hwpx', 'ref', 'ref_empty.hwpx');
+
+test('snapshot options: defaults, limits and unknown keys', () => {
+  assert.deepEqual(checkSnapshotOptions(undefined, 'darwin'), { pages: undefined, png: true, pdf: true, maxPx: 1600 });
+  assert.equal(checkSnapshotOptions({}, 'linux').png, false);
+  assert.throws(() => checkSnapshotOptions({ png: true }, 'linux'), /PNG_UNSUPPORTED/);
+  for (const bad of [{ pages: [] }, { pages: [1, 1] }, { pages: [-1] }, { pages: '0' }, { maxPx: 10 }, { png: false, pdf: false }, { page: 0 }])
+    assert.throws(() => checkSnapshotOptions(bad, 'darwin'), /RENDER_ARGS_INVALID/, JSON.stringify(bad));
+  assert.throws(() => checkSnapshotOptions({ pages: Array.from({ length: 201 }, (_, i) => i) }, 'darwin'), /RENDER_ARGS_INVALID/);
+  assert.match(stampName('ab'.repeat(32), new Date(2026, 8, 27, 13, 5, 9)), /^20260927-130509-abababab$/);
+  assert.equal(pageFile(0, 'png'), 'page-001.png');
+});
+
+async function seed(t, files) {
+  const root = await mkdtemp(join(tmpdir(), 'lidge-hwp-render-docs-'));
+  const exportsRoot = await mkdtemp(join(tmpdir(), 'lidge-hwp-render-out-'));
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(exportsRoot, { recursive: true, force: true })]));
+  for (const [id, src] of Object.entries(files)) await cp(join(SAMPLES, src), join(root, id));
+  await run('git', ['-C', root, 'init', '-q']);
+  await run('git', ['-C', root, 'add', '--', ...Object.keys(files)]);
+  await run('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@local.invalid', 'commit', '-qm', 'seed']);
+  const { runAgent } = await import('../server/agent/runner.mjs');
+  const context = { store: createDocStore(root), tabs: createTabs(), config: { exportsRoot } };
+  const agent = code => runAgent({ code, timeoutMs: 60000 }, context);
+  return { root, exportsRoot, agent, context };
+}
+const clean = async root => assert.equal((await run('git', ['-C', root, 'status', '--porcelain'])).stdout, '');
+
+test('hwp.snapshot writes per-page PDF and PNG outside the library', async t => {
+  const { root, exportsRoot, agent } = await seed(t, { 'long.hwp': 'hwp3-sample16-hwp5.hwp' });
+  const out = await agent("const h=await hwp.open('long.hwp'); return await hwp.snapshot(h,{pages:[1,0],maxPx:800});");
+  assert.equal(out.ok, true, JSON.stringify(out));
+  const r = out.result;
+  assert.equal(r.docId, 'long.hwp'); assert.equal(r.origin, 'disk'); assert.equal(r.pageCount, 64);
+  assert.ok(r.dir.startsWith(join(await realpath(exportsRoot), 'long.hwp') + '/'), r.dir);
+  assert.deepEqual(r.pages.map(p => p.page), [1, 0]);
+  assert.deepEqual((await readdir(r.dir)).sort(), ['page-001.pdf', 'page-001.png', 'page-002.pdf', 'page-002.png']);
+  for (const p of r.pages) {
+    assert.ok(await startsWith(join(r.dir, p.pdf), PDF), p.pdf);
+    assert.ok(await startsWith(join(r.dir, p.png), PNG), p.png);
+  }
+  const { stdout } = await run('sips', ['-g', 'pixelHeight', join(r.dir, 'page-001.png')]);
+  assert.match(stdout, /pixelHeight: 800/);
+  assert.deepEqual(out.saved, []);
+  await clean(root);
+});
+
+test('hwp.snapshot without pages renders every page; exportPdf writes one document PDF', async t => {
+  const { root, agent } = await seed(t, { 'empty.hwpx': EMPTY });
+  const out = await agent("const h=await hwp.open('empty.hwpx'); return {s: await hwp.snapshot(h,{png:false}), p: await hwp.exportPdf(h)};");
+  assert.equal(out.ok, true, JSON.stringify(out));
+  const { s, p } = out.result;
+  assert.equal(s.pageCount, 1); assert.deepEqual(s.pages, [{ page: 0, pdf: 'page-001.pdf' }]);
+  assert.deepEqual(await readdir(s.dir), ['page-001.pdf']);
+  assert.equal(basename(p.path), 'document.pdf'); assert.equal(p.pageCount, 1);
+  assert.ok(await startsWith(p.path, PDF)); assert.ok(p.bytes > 0);
+  assert.notEqual(p.dir, s.dir, 'each render gets its own directory');
+  await clean(root);
+});
+
+test('snapshot renders unsaved edits from the same call and writes nothing to the library', async t => {
+  const { root, agent } = await seed(t, { 'empty.hwpx': EMPTY });
+  const before = await readFile(join(root, 'empty.hwpx'));
+  const out = await agent("const h=await hwp.open('empty.hwpx'); await hwp.insertText(h,{paragraph:0,text:'스냅샷'}); return await hwp.snapshot(h,{png:false});");
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.result.origin, 'edited');
+  assert.notEqual(out.result.sourceSha256, (await run('shasum', ['-a', '256', join(root, 'empty.hwpx')])).stdout.slice(0, 64));
+  assert.ok(Buffer.compare(before, await readFile(join(root, 'empty.hwpx'))) === 0);
+  await clean(root);
+});
+
+test('out-of-range pages fail and leave no output directory', async t => {
+  const { exportsRoot, agent } = await seed(t, { 'empty.hwpx': EMPTY });
+  for (const pages of [[5], [0, 3]]) {
+    const out = await agent(`const h=await hwp.open('empty.hwpx'); return await hwp.snapshot(h,{pages:${JSON.stringify(pages)},png:false});`);
+    assert.equal(out.ok, false); assert.match(out.error, /PAGE_OUT_OF_RANGE/);
+  }
+  assert.deepEqual(await readdir(join(exportsRoot, 'empty.hwpx')), []);
+});
+
+test('exports inside the document library are refused', async t => {
+  const { root, agent, context } = await seed(t, { 'empty.hwpx': EMPTY });
+  context.config.exportsRoot = join(root, 'exports');
+  const out = await agent("const h=await hwp.open('empty.hwpx'); return await hwp.exportPdf(h);");
+  assert.equal(out.ok, false); assert.match(out.error, /EXPORTS_INSIDE_DOCS/);
+  await assert.rejects(access(join(root, 'exports')));
+  await clean(root);
+});

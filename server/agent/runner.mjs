@@ -9,6 +9,8 @@ import { apiHelp, REGISTRY, HELPERS } from '../../lib/api-registry.mjs';
 import { format, paraFormat, getFormat, styles, applyStyle } from '../../lib/format.mjs';
 import { selectAll } from '../../lib/scope.mjs';
 import { STRUCTURE } from '../../lib/structure.mjs';
+import { renderDocument } from '../../lib/render.mjs';
+import { EXPORTS_ROOT, RHWP_BIN } from '../../lib/config.mjs';
 const MUTATE_HELPERS = { format, paraFormat, applyStyle, ...STRUCTURE };
 import { contentSignature } from '../../lib/signature.mjs';
 // 탭이 agent.release에 답할 한도. 채널은 진행 중인 apply가 확정될 때까지 release를 미루므로 apply 뒤처리 시간을 덮는다.
@@ -146,6 +148,19 @@ export async function runAgent({ code, timeoutMs = 30000 },
     }
     if (name === 'getFormat') return getFormat(state.doc, args[1]);
     if (name === 'styles') return styles(state.doc);
+    if (name === 'snapshot' || name === 'exportPdf') {
+      // 읽기 전용 렌더. 이번 호출에서 편집했으면 편집 결과를, 아니면 연 바이트(탭이 있으면 탭의 현재 내용)를 그린다.
+      let bytes = state.source.bytes, origin = state.prepared && state.prepared.contentLoss.count === 0 ? 'tab' : 'disk';
+      if (state.batch.ops.length) {
+        const exported = exporter(state.doc, state.source.format);
+        if (exported.report.count > 0) throw new Error('RENDER_CONTENT_LOSS: edited document cannot be exported without loss; save first');
+        bytes = exported.bytes; origin = 'edited';
+      }
+      const out = await renderDocument({ kind: name === 'snapshot' ? 'snapshot' : 'pdf', bytes, format: state.source.format,
+        docId: state.id, options: args[1], exportsRoot: config.exportsRoot ?? EXPORTS_ROOT, docsRoot: store.root,
+        rhwpBin: config.rhwpBin ?? RHWP_BIN, deadline });
+      return { docId: state.id, origin, ...out };
+    }
     if (name === 'api') {
       const method = args[1], rest = args.slice(2);
       if (typeof method !== 'string') throw new Error('API_METHOD_DENIED: method name required');
