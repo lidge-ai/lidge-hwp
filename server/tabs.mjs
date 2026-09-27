@@ -223,8 +223,12 @@ export function createTabs() {
     const job = pending.get(requestId);
     return job?.type === 'agent.apply' && job.used ? job.expected : null;
   }
+  function hasRootActivity(key) {
+    const prefix = `ext://${key}/`;
+    return [...byDoc.keys(), ...reservations.keys()].some(id => id.startsWith(prefix));
+  }
 
   return { claim, owns, owner, claimed, release, events, close, requestAgent, acceptReply,
     agentLockFor, finishAgentSave, saveStatus, waitAgentSave, isIsolated, isolate,
-    followTarget, reserve, cancelReservation, waitConnected, reservedFor, agentExpected };
+    followTarget, reserve, cancelReservation, waitConnected, reservedFor, agentExpected, hasRootActivity };
 }

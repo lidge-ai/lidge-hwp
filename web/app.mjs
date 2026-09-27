@@ -2,15 +2,17 @@ import { createStudio } from '/editor/index.js';
 import { startAgentChannel } from '/agent-channel.mjs';
 import { followSwitch } from '/follow-switch.mjs';
 import { initSidebar } from '/sidebar.mjs';
-import { groupDocs, groupKeyOf, renderProjects, readCollapsedGroups, writeCollapsedGroups, bindListKeys } from '/projects.mjs';
+import { groupDocs, groupKeyOf, renderProjects, readCollapsedGroups, writeCollapsedGroups, bindListKeys, displayName } from '/projects.mjs';
 
 initSidebar();
 
 const docFilter = document.querySelector('#doc-filter');
 const refreshButton = document.querySelector('#docs-refresh');
 const projectAdd = document.querySelector('#project-add');
+const folderAdd = document.querySelector('#folder-add');
 
 const list = document.querySelector('#docs');
+const externalList = document.querySelector('#external-docs');
 const status = document.querySelector('#status');
 const filename = document.querySelector('#filename');
 const saveButton = document.querySelector('#save');
@@ -82,7 +84,7 @@ async function switchTo(id, { reservation = null, agent = false } = {}) {
     saveButton.disabled = true;
   }
   try {
-    say(agent ? `AI가 ${id}를 편집하려 해서 그 문서로 전환하는 중` : '문서를 여는 중');
+    say(agent ? `AI가 ${nameOf(id)}를 편집하려 해서 그 문서로 전환하는 중` : '문서를 여는 중');
     const response = await api(docUrl(id));
     const bytes = await response.arrayBuffer();
     const etag = response.headers.get('ETag');
@@ -121,17 +123,17 @@ async function switchTo(id, { reservation = null, agent = false } = {}) {
     current = next;
     delete document.body.dataset.noDocument;
     studio.element.inert = false;
-    filename.textContent = id; filename.title = id;
+    filename.textContent = nameOf(id); filename.title = id;
     saveButton.disabled = agentLocked;
-    for (const button of list.querySelectorAll('button[data-id]')) button.setAttribute('aria-current', String(button.dataset.id === id));
+    for (const button of document.querySelectorAll('#docs button[data-id], #external-docs button[data-id]')) button.setAttribute('aria-current', String(button.dataset.id === id));
     // 방금 연 문서의 그룹이 접혀 있으면 펼치고 활성 버튼이 보이게 한다.
     expandGroup(groupKeyOf(id));
     renderDocs();
-    const activeButton = list.querySelector('button[aria-current="true"]');
+    const activeButton = document.querySelector('#docs button[aria-current="true"], #external-docs button[aria-current="true"]');
     activeButton?.scrollIntoView({ block: 'nearest' });
     if (openHadListFocus) activeButton?.focus();
     openHadListFocus = false;
-    say(agent ? `${id} 열림 · AI 편집을 기다리는 중` : `${id} 열림`);
+    say(agent ? `${nameOf(id)} 열림 · AI 편집을 기다리는 중` : `${nameOf(id)} 열림`);
     return true;
   } catch (error) {
     // AI 전환이면 runner가 FOLLOW_LOAD_FAILED로 알아채고, followSwitch가 예약을 돌려준다.
@@ -140,7 +142,7 @@ async function switchTo(id, { reservation = null, agent = false } = {}) {
       // 이전 문서는 이미 반납했다. 화면에 남은 옛 문서를 편집·저장할 수 없게 덮고, 목록에서 다시 고르게 한다.
       filename.textContent = ''; filename.title = '';
       saveButton.disabled = true;
-      for (const button of list.querySelectorAll('button[data-id]')) button.setAttribute('aria-current', 'false');
+      for (const button of document.querySelectorAll('#docs button[data-id], #external-docs button[data-id]')) button.setAttribute('aria-current', 'false');
       document.body.dataset.noDocument = 'true'; // CSS: [data-no-document] #studio { pointer-events:none; opacity:.35 } + 안내 오버레이
       studio.element.inert = true; // 포커스·키보드 입력까지 막는다(iframe은 pointer-events만으로 키 입력이 막히지 않음)
       studio.element.blur?.();
@@ -148,7 +150,7 @@ async function switchTo(id, { reservation = null, agent = false } = {}) {
     // AI 전환은 알림을 followSwitch 한 곳이 맡는다(중복 알림·구체 사유 덮어쓰기 방지). 화면 정리만 하고 던진다.
     if (agent) throw error;
     say(error.message === 'DOCUMENT_LOCKED'
-      ? `${id}는 AI가 편집 중입니다 · 끝난 뒤 목록에서 다시 여세요`
+      ? `${nameOf(id)}는 AI가 편집 중입니다 · 끝난 뒤 목록에서 다시 여세요`
       : `열기 실패: ${error.message} · 목록에서 문서를 다시 선택하세요`);
     return false;
   }
@@ -180,6 +182,8 @@ async function save() {
 
 // 프로젝트 그룹 상태(wp5). 접힌 그룹 키는 localStorage에, 필터는 세션에만 둔다.
 let groups = [];
+let externalGroups = [];
+const nameOf = id => displayName(id, externalGroups);
 let collapsedGroups = readCollapsedGroups();
 let openHadListFocus = false; // 목록에서 연 열기는 loadFile이 iframe으로 뺏은 포커스를 목록에 돌려놓는다
 const PROJECT_ERRORS = { PROJECT_EXISTS: '이미 있는 프로젝트입니다', INVALID_PROJECT: '쓸 수 없는 이름입니다' };
@@ -193,7 +197,7 @@ function renderDocs() {
   // 목록을 다시 그리면 노드가 교체되어 포커스가 날아간다. 포커스가 목록 안에 있었으면
   // 같은 문서 버튼·그룹 헤더로 복원하고, 없어졌으면 활성 문서 버튼으로 보낸다.
   const active = document.activeElement;
-  const inList = list.contains(active);
+  const activeList = list.contains(active) ? list : externalList.contains(active) ? externalList : null;
   const selector = active?.dataset?.id ? `button[data-id="${CSS.escape(active.dataset.id)}"]`
     : active?.classList?.contains('group-header') ? `.group-header[data-group="${CSS.escape(active.dataset.group)}"]`
     : null;
@@ -219,14 +223,33 @@ function renderDocs() {
     },
     onImport: (key, files) => { void importFiles(key, files); },
   });
-  if (inList) {
-    (selector && list.querySelector(selector) || list.querySelector('button[aria-current="true"]'))?.focus();
+  renderProjects(externalList, externalGroups, {
+    currentId: current?.id ?? null, collapsed: collapsedGroups, query: docFilter.value,
+    emptyLabel: externalGroups.length === 0 ? '추가한 폴더가 없습니다.' : '추가한 폴더에 HWP/HWPX가 없습니다.',
+    onOpen: id => { openHadListFocus = externalList.contains(document.activeElement); void openDoc(id); },
+    onToggle: (key, expanded) => {
+      if (expanded) collapsedGroups.delete(key); else collapsedGroups.add(key);
+      writeCollapsedGroups(collapsedGroups); renderDocs();
+    },
+    groupActions: group => {
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'group-remove';
+      button.setAttribute('aria-label', `${group.label} 폴더 제거`);
+      button.title = `${group.path} 등록 해제`;
+      button.textContent = '×';
+      button.addEventListener('click', () => { void removeFolder(group); });
+      return button;
+    },
+  });
+  if (activeList) {
+    (selector && activeList.querySelector(selector)
+      || document.querySelector('#docs button[aria-current="true"], #external-docs button[aria-current="true"]'))?.focus();
   }
 }
 async function loadDocs() {
   const response = await api('/api/docs');
-  const { docs, projects = [] } = await response.json();
-  groups = groupDocs(docs, projects);
+  const { docs, projects = [], roots = [] } = await response.json();
+  ({ primary: groups, external: externalGroups } = groupDocs(docs, projects, roots));
   renderDocs();
   say(docs.length === 0 ? '문서함에 HWP/HWPX가 없습니다.' : '문서를 선택하세요.');
 }
@@ -236,11 +259,36 @@ bindListKeys(list, (key, expanded) => {
   renderDocs();
   list.querySelector(`.group-header[data-group="${CSS.escape(key)}"]`)?.focus();
 });
+bindListKeys(externalList, (key, expanded) => {
+  if (expanded) collapsedGroups.delete(key); else collapsedGroups.add(key);
+  writeCollapsedGroups(collapsedGroups); renderDocs();
+  externalList.querySelector(`.group-header[data-group="${CSS.escape(key)}"]`)?.focus();
+});
 docFilter.addEventListener('input', renderDocs);
 docFilter.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && docFilter.value) { docFilter.value = ''; renderDocs(); event.stopPropagation(); }
 });
 refreshButton.addEventListener('click', () => { loadDocs().catch((error) => say(`목록 새로고침 실패: ${error.message}`)); });
+folderAdd.addEventListener('click', async () => {
+  if (folderAdd.disabled) return;
+  folderAdd.disabled = true;
+  try {
+    const response = await api('/api/roots/pick', { method: 'POST' });
+    if (response.status === 204) { say('폴더 선택 취소'); return; }
+    const { root } = await response.json();
+    await loadDocs();
+    externalList.querySelector(`.group-header[data-group="${CSS.escape(`ext://${root.key}`)}"]`)?.focus();
+    say(`${root.label} 폴더 추가`);
+  } catch (error) { say(`폴더 추가 실패: ${error.message}`); }
+  finally { folderAdd.disabled = false; }
+});
+async function removeFolder(group) {
+  if (!confirm(`${group.label} 폴더를 목록에서 제거하시겠습니까? 파일과 이력은 남습니다.`)) return;
+  try {
+    await api(`/api/roots/${encodeURIComponent(group.key.slice('ext://'.length))}`, { method: 'DELETE' });
+    await loadDocs(); folderAdd.focus(); say(`${group.label} 폴더 등록 해제`);
+  } catch (error) { say(`폴더 제거 실패: ${error.message}`); }
+}
 
 // 새 프로젝트: "+"가 목록 맨 위에 인라인 입력 행을 연다. IME 조합 중 Enter는 제출이 아니라 조합 확정이다.
 projectAdd.addEventListener('click', () => {

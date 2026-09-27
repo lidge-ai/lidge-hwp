@@ -536,3 +536,89 @@ test('failed save plus failed reload poisons mutations until reload succeeds', a
   await registry.register(third);
   assert.equal((await registry.list()).length, 3);
 });
+
+test('remove preserves cached store after rename failure and succeeds on retry', async t => {
+  const f = await fixture(t);
+  let failOnce = true;
+  const lib = await createLibrary({ docsRoot: f.docs, stateDir: f.stateDir, registryOps: {
+    rename: async (...args) => {
+      if (failOnce) { failOnce = false; throw Object.assign(new Error('rename failed'), { code: 'EIO' }); }
+      return rename(...args);
+    },
+  } });
+  lib.quarantine(f.id, 'RECOVERY_FAILED');
+  await assert.rejects(lib.remove(f.added.key), { code: 'EIO' });
+  assert.equal(lib.isQuarantined(f.id), true);
+  assert.equal((await lib.roots()).length, 1);
+  assert.deepEqual(await lib.remove(f.added.key), {});
+  await assert.rejects(lib.resolveId(f.id), { code: 'ROOT_NOT_FOUND' });
+  assert.equal(lib.exportRoots().includes(await realpath(f.extra)), false);
+});
+
+test('post-rename sync failure returns warning and evicts root from same library instance', async t => {
+  const f = await fixture(t);
+  const lib = await createLibrary({ docsRoot: f.docs, stateDir: f.stateDir, registryOps: {
+    syncDir: async () => { throw Object.assign(new Error('sync failed'), { code: 'REMOVE_SYNC_FAILED' }); },
+  } });
+  assert.deepEqual(await lib.remove(f.added.key), { warning: 'REMOVE_SYNC_FAILED' });
+  assert.deepEqual(await lib.roots(), []);
+  assert.equal(lib.exportRoots().includes(await realpath(f.extra)), false);
+  await assert.rejects(lib.resolveId(f.id), { code: 'ROOT_NOT_FOUND' });
+  assert.deepEqual(await readFile(join(f.extra, 'a.hwpx')), HWPX);
+});
+
+test('late pre-removal snapshot cannot resurrect a removed root', async t => {
+  const f = await fixture(t);
+  let armed = false, held = 0, release;
+  let entered;
+  const enteredPromise = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const lib = await createLibrary({ docsRoot: f.docs, stateDir: f.stateDir, registryOps: {
+    readFile: async (...args) => {
+      const bytes = await readFile(...args);
+      if (armed && held++ === 0) { armed = false; entered(bytes); await gate; }
+      return bytes;
+    },
+  } });
+  armed = true;
+  const pending = lib.roots();
+  const oldBytes = await enteredPromise;
+  assert.match(oldBytes.toString(), new RegExp(f.added.key));
+  await lib.remove(f.added.key);
+  release();
+  assert.deepEqual(await pending, []);
+  assert.equal(held, 1);
+  assert.equal(lib.exportRoots().includes(await realpath(f.extra)), false);
+});
+
+test('removing gate rejects fresh lock and resolve while preserving state lookups', async t => {
+  const f = await fixture(t);
+  const lib = await createLibrary({ docsRoot: f.docs, stateDir: f.stateDir });
+  await lib.remove(f.added.key, () => {
+    assert.equal(lib.isRootRemoving(f.id), true);
+    assert.throws(() => lib.lock(f.id), { code: 'ROOT_BUSY' });
+    assert.equal(lib.isLocked(f.id), false);
+    return false;
+  });
+  assert.equal(lib.isRootRemoving(f.id), false);
+  await assert.rejects(lib.resolveId(f.id), { code: 'ROOT_NOT_FOUND' });
+});
+
+test('in-flight removal blocks external opens and locks until registry write settles', async t => {
+  const f = await fixture(t);
+  let entered, release;
+  const atRename = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const lib = await createLibrary({ docsRoot: f.docs, stateDir: f.stateDir, registryOps: {
+    rename: async (...args) => { entered(); await gate; return rename(...args); },
+  } });
+  const pending = lib.remove(f.added.key);
+  await atRename;
+  try {
+    assert.equal(lib.isRootRemoving(f.id), true);
+    await assert.rejects(lib.resolveId(f.id), { code: 'ROOT_BUSY' });
+    assert.throws(() => lib.lock(f.id), { code: 'ROOT_BUSY' });
+  } finally { release(); }
+  await pending;
+  assert.equal(lib.isRootRemoving(f.id), false);
+});

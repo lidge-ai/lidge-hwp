@@ -21,23 +21,45 @@ const icon = (paths) => {
 export const chevron = () => icon('<path d="m9 18 6-6-6-6"/>');
 export const folder = () => icon('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>');
 
-export function groupDocs(docs, projects = []) {
+export function groupDocs(docs, projects = [], roots = []) {
   const groups = new Map(projects.map((name) => [name, []]));
+  const external = new Map(roots.map(root => [root.key, { key: `ext://${root.key}`,
+    label: root.label, path: root.path, available: root.available, reason: root.reason,
+    kind: 'external', docs: [] }]));
   for (const doc of docs) {
+    const match = /^ext:\/\/([0-9a-f-]{36})\/(.+)$/i.exec(doc.id);
+    if (match) {
+      const group = external.get(match[1]);
+      if (group) group.docs.push({ id: doc.id, name: match[2], format: doc.format });
+      continue;
+    }
     const slash = doc.id.indexOf('/');
     const key = slash < 0 ? ROOT_GROUP : doc.id.slice(0, slash);
     const name = slash < 0 ? doc.id : doc.id.slice(slash + 1);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push({ id: doc.id, name, format: doc.format });
   }
-  return [...groups.entries()]
-    .map(([key, list]) => ({ key, label: key || ROOT_LABEL,
+  const primary = [...groups.entries()]
+    .map(([key, list]) => ({ key, label: key || ROOT_LABEL, kind: 'primary',
       docs: list.sort((a, b) => a.name.localeCompare(b.name, 'ko')) }))
     .sort((a, b) => (a.key === ROOT_GROUP) - (b.key === ROOT_GROUP)
       || a.label.localeCompare(b.label, 'ko'));
+  return { primary, external: [...external.values()].map(group => ({ ...group,
+    docs: group.docs.sort((a, b) => a.name.localeCompare(b.name, 'ko')) })) };
 }
 
-export const groupKeyOf = (id) => id.includes('/') ? id.slice(0, id.indexOf('/')) : ROOT_GROUP;
+export const groupKeyOf = (id) => {
+  const match = /^ext:\/\/([0-9a-f-]{36})\//i.exec(id);
+  return match ? `ext://${match[1]}` : id.includes('/') ? id.slice(0, id.indexOf('/')) : ROOT_GROUP;
+};
+
+// 사람이 읽는 문서 이름. 외부 문서는 내부 id(ext://<UUID>/...) 대신 "폴더 이름/상대경로"로 보인다.
+export function displayName(id, externalGroups = []) {
+  const match = /^ext:\/\/([0-9a-f-]{36})\/(.+)$/i.exec(id || '');
+  if (!match) return id;
+  const group = externalGroups.find(g => g.key === `ext://${match[1]}`);
+  return group ? `${group.label}/${match[2]}` : match[2];
+}
 
 // macOS 파일명이 NFD로 들어올 수 있어 양쪽을 NFC로 맞춘 뒤 소문자 부분 문자열로 비교한다.
 export function matchDoc(doc, query) {
@@ -59,7 +81,8 @@ export function writeCollapsedGroups(collapsed, storage = globalThis.localStorag
 // listEl 아래에 그룹 헤더(펼침 버튼)+문서 버튼(data-id)을 그린다.
 // query가 있으면 일치하는 그룹만 펼친 채로 보여 주고 접힘 저장소는 건드리지 않는다.
 export function renderProjects(listEl, groups, { currentId = null, collapsed = new Set(),
-    query = '', onOpen = () => {}, onToggle = () => {}, groupActions = null, onImport = null } = {}) {
+    query = '', onOpen = () => {}, onToggle = () => {}, groupActions = null, onImport = null,
+    emptyLabel = '문서함에 HWP/HWPX가 없습니다.' } = {}) {
   listEl.textContent = '';
   let shown = 0;
   const filtering = matchDoc({ id: '' }, query) === false;
@@ -79,20 +102,23 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
     header.dataset.group = group.key;
     header.setAttribute('aria-expanded', String(expanded));
     header.setAttribute('aria-controls', bodyId);
-    header.title = group.label;
+    header.title = group.path ?? group.label;
+    if (group.available === false && group.reason) header.dataset.reason = group.reason;
     header.append(chevron());
     const chev = header.firstChild;
     chev.classList.add('chevron');
     header.append(folder());
     const label = document.createElement('span');
     label.className = 'group-label';
-    label.textContent = group.label;
+    const reasonLabel = group.reason === 'MISSING' ? ' (찾을 수 없음)'
+      : group.reason === 'REPLACED' ? ' (다른 폴더로 바뀜)' : '';
+    label.textContent = group.label + (group.available === false ? reasonLabel : '');
     const count = document.createElement('span');
     count.className = 'count';
     count.setAttribute('aria-hidden', 'true');
     count.textContent = String(group.docs.length);
     header.append(label, count);
-    header.setAttribute('aria-label', `${group.label} 프로젝트, 문서 ${group.docs.length}개`);
+    header.setAttribute('aria-label', `${group.label}${group.available === false ? reasonLabel : ''} ${group.kind === 'external' ? '추가한 폴더' : '프로젝트'}, 문서 ${group.docs.length}개`);
     header.addEventListener('click', () => onToggle(group.key, !expanded));
     row.append(header);
     if (groupActions) {
@@ -100,7 +126,7 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
       if (actions) row.append(actions);
     }
     item.append(row);
-    if (onImport && group.key !== ROOT_GROUP) {
+    if (onImport && group.kind === 'primary' && group.key !== ROOT_GROUP) {
       // 파일을 그룹 위에 놓으면 그 프로젝트로 가져온다. 파일 드래그일 때만 반응한다.
       const isFileDrag = (event) => event.dataTransfer?.types?.includes('Files');
       item.addEventListener('dragover', (event) => {
@@ -152,7 +178,7 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
   if (shown === 0) {
     const empty = document.createElement('li');
     empty.className = 'empty';
-    empty.textContent = filtering ? '일치하는 문서가 없습니다' : '문서함에 HWP/HWPX가 없습니다.';
+    empty.textContent = filtering ? '일치하는 문서가 없습니다' : emptyLabel;
     listEl.append(empty);
   }
 }
