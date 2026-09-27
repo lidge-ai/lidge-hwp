@@ -54,10 +54,14 @@ const PAGINATION_BOUNDARY_KEYS = new Set([
  *
  * 서브모드(머리말/꼬리말·각주)의 우회로보다 좁게 잡는다 — goto·select-all 은 셀 블록을
  * 들고 있을 이유가 없는 조작이라 종전대로 블록을 해제하고 넘긴다.
+ *
+ * edit:delete(⌘E/Ctrl+E, 한컴 "지우기")도 여기서 통과시킨다 — 한컴은 셀 블록에서
+ * 지우기를 눌러도 블록을 놓지 않고, performDelete 의 셀 블록 분기가 실제 처리를 한다.
  */
 const CELL_BLOCK_GLOBAL_COMMANDS = new Set([
   'edit:undo',
   'edit:redo',
+  'edit:delete',
 ]);
 
 function dispatchCellBlockGlobalShortcut(this: any, e: KeyboardEvent): boolean {
@@ -1269,12 +1273,22 @@ export function onKeyDown(this: any, e: KeyboardEvent): void {
 
     // [Task #6741] 선택한 칸들의 내용을 한 번에 지우고 블록을 유지한다 — 한컴과 같다.
     // 종전에는 아래 "그 외 키"로 떨어져 블록이 풀리고 캐럿에서 한 글자만 지워졌다.
-    if (e.key === 'Delete' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    // 한컴의 "Delete" 키는 macOS 의 delete 키로 브라우저에는 Backspace 로 보고되므로
+    // 무보조 Backspace 도 같은 내용 지우기다 (fn+Delete 가 forward Delete).
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       if (!this.cursor.isProtectedCellSelectionMode()) {
         this.clearSelectedCellBlock();
         this.updateCellSelection();
       }
+      return;
+    }
+    // ⌘+⌫ / ⌘+Delete — 한컴 단축키표에는 없지만 macOS 의 "항목 지우기" 관례라
+    // 지우기(edit:delete)와 같은 경로로 보낸다. performDelete 의 셀 블록 분기가
+    // 전체 줄/칸 정렬 블록이면 구조 삭제 여부를 묻고, 아니면 내용만 지운다.
+    if ((e.key === 'Backspace' || e.key === 'Delete') && e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      this.dispatcher?.dispatch('edit:delete');
       return;
     }
     const cellArrowAction = getCellSelectionArrowAction(e);
