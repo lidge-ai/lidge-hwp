@@ -219,8 +219,8 @@ test('pre-commit failure restores names and exact index snapshots including stag
 });
 
 test('destination recorded only in HEAD (deleted from disk and index) is a collision, including case/NFC variants', async t => {
-  const f = await setup(t, { files: { 'P/a.hwp': HWP, 'P/b.hwp': HWP, 'P/other.hwp': HWP } });
-  await git(f.root, 'rm', '-q', '--', 'P/b.hwp'); // 디스크와 index에서 지우고 커밋하지 않은 상태
+  const f = await setup(t, { files: { 'P/a.hwp': HWP, 'P/b.hwp': HWP, 'P/새.hwp': HWP, 'P/other.hwp': HWP } });
+  await git(f.root, 'rm', '-q', '--', 'P/b.hwp', 'P/새.hwp'); // 디스크와 index에서 지우고 커밋하지 않은 상태
   await writeFile(join(f.root, 'P/other.hwp'), Buffer.concat([HWP, Buffer.from('stage')]));
   await git(f.root, 'add', 'P/other.hwp');
   const entries = async () => Promise.all(['P/a.hwp', 'P/b.hwp', 'P/other.hwp']
@@ -228,7 +228,7 @@ test('destination recorded only in HEAD (deleted from disk and index) is a colli
   const beforeHead = await head(f.root);
   const beforeIndex = await entries();
   const owner = await claim(f, 'P/a.hwp');
-  for (const name of ['b.hwp', 'B.hwp']) {
+  for (const name of ['b.hwp', 'B.hwp', '새.hwp'.normalize('NFD')]) {
     await expectError(await requestRename(f, 'P/a.hwp', name, owner), 409, 'NAME_COLLISION');
   }
   assert.equal(await head(f.root), beforeHead);
