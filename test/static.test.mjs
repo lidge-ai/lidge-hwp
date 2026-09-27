@@ -81,10 +81,13 @@ test('rename controls, F2 handling, and inline focus styles are served', async t
   t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
   const base = `http://127.0.0.1:${server.address().port}`;
   const app = await (await fetch(base + '/app.mjs')).text();
+  const shortcuts = await (await fetch(base + '/shell-shortcuts.mjs')).text();
   const projects = await (await fetch(base + '/projects.mjs')).text();
   const css = await (await fetch(base + '/style.css')).text();
-  assert.match(app, /event\.key === 'F2'/);
-  assert.match(app, /event\.metaKey && event\.shiftKey/);
+  assert.match(app, /window\.addEventListener\('keydown', event => \{/);
+  assert.match(app, /shellShortcutDecision\(event\)/);
+  assert.match(shortcuts, /event\.code === 'F2'/);
+  assert.match(shortcuts, /event\.shiftKey && !event\.altKey/);
   assert.match(app, /candidateId = id\.slice/);
   assert.match(projects, /className = 'doc-rename'/);
   assert.match(projects, /contextmenu/);

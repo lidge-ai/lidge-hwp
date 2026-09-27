@@ -187,7 +187,7 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
       rename.type = 'button';
       rename.className = 'doc-rename';
       rename.textContent = '이름';
-      rename.title = `${shown} 이름 바꾸기`;
+      rename.title = `${shown} 이름 바꾸기 (F2, ⌘⇧R)`;
       rename.setAttribute('aria-label', `${shown} 이름 바꾸기`);
       rename.addEventListener('click', () => onRename(doc.id));
       row.append(rename);

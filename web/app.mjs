@@ -1,8 +1,8 @@
 import { createStudio } from '/editor/index.js';
 import { startAgentChannel } from '/agent-channel.mjs';
 import { followSwitch } from '/follow-switch.mjs';
-import { copyPath, isCopyPathShortcut } from '/copy-path.mjs';
-import { isNewDocShortcut } from '/new-doc.mjs';
+import { copyPath } from '/copy-path.mjs';
+import { shellShortcutDecision } from '/shell-shortcuts.mjs';
 import { dispatchHostEvent } from '/host-shortcuts.mjs';
 import { initSidebar } from '/sidebar.mjs';
 import { groupDocs, groupKeyOf, createGroupFor, matchDoc, renderProjects, readCollapsedGroups, writeCollapsedGroups, bindListKeys, displayName } from '/projects.mjs';
@@ -448,31 +448,18 @@ const targetForDocumentAction = () => {
   return focused?.dataset.id ?? current?.id ?? null;
 };
 const copyDocumentPath = id => copyPath(id, { request: api, clipboard: navigator.clipboard, say });
-document.addEventListener('keydown', event => {
-  if (event.isComposing || event.target?.isContentEditable
-      || /^(INPUT|TEXTAREA)$/.test(event.target?.tagName || '')) return;
-  if (!isCopyPathShortcut(event)) return;
-  event.preventDefault();
-  void copyDocumentPath(targetForDocumentAction());
-});
 copyPathButton.addEventListener('click', () => { void copyDocumentPath(current?.id ?? null); });
-document.addEventListener('keydown', event => {
-  if (!isNewDocShortcut(event)) return;
+window.addEventListener('keydown', event => {
+  const { prevent, action } = shellShortcutDecision(event);
+  if (!prevent) return;
   event.preventDefault();
-  requestNewDocument();
-});
-document.addEventListener('keydown', event => {
-  const cmd = event.metaKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'r';
-  const f2 = event.key === 'F2' && !event.metaKey && !event.ctrlKey && !event.altKey;
-  if (!cmd && !f2) return;
-  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.isComposing) return;
-  const focused = document.activeElement?.closest?.('.doc-row')?.querySelector('.doc[data-id]')
-    ?? document.activeElement?.closest?.('.doc[data-id]');
-  const id = focused?.dataset.id ?? current?.id;
-  if (!id) return;
-  event.preventDefault();
-  void beginRename(id);
-});
+  if (action === 'copyPath') void copyDocumentPath(targetForDocumentAction());
+  else if (action === 'newDocument') requestNewDocument();
+  else if (action === 'rename') {
+    const id = targetForDocumentAction();
+    if (id) void beginRename(id);
+  }
+}, true);
 bindListKeys(list, (key, expanded) => {
   if (expanded) collapsedGroups.delete(key); else collapsedGroups.add(key);
   writeCollapsedGroups(collapsedGroups);

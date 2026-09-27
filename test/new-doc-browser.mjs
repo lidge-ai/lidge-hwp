@@ -139,6 +139,12 @@ async function main() {
 
     await openInput();
     const beforeIme = await postCount();
+    const protectedShortcut = await cdp.eval(`const input = document.querySelector('.new-doc-row input');
+      const event = ${key('Dead', "code: 'KeyN', altKey: true, metaKey: true")};
+      input.dispatchEvent(event); return event.defaultPrevented;`);
+    assert.equal(protectedShortcut, true);
+    assert.equal(await postCount(), beforeIme);
+    assert.equal((await cdp.eval(inlineState())).row, true);
     await cdp.eval(`const input = document.querySelector('.new-doc-row input');
       input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
       input.dispatchEvent(${key('Enter', 'isComposing: true')});`);

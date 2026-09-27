@@ -7,6 +7,8 @@ import {
   EMBED_HIDDEN_EDIT_COMMAND_IDS,
   EMBED_HIDDEN_FILE_COMMAND_IDS,
   embedHostAction,
+  embedHostKey,
+  hostShortcutDecision,
   isEmbedSwallowedFileShortcut,
   resolveChromeMode,
   resolveChromeModeRequest,
@@ -201,8 +203,9 @@ test('embed 저장·인쇄 단축키 판정은 문서 로드 여부와 무관한
   // 전파를 끊는다 — embed 저장은 lidge 호스트 저장으로 간다. 나머지 파일 단축키는
   // 기존대로 preventDefault로만 삼킨다.
   const mainSource = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
-  assert.match(mainSource, /if \(chromeMode === 'embed'\) \{[\s\S]*?document\.addEventListener\('keydown', \(e\) => \{\n\s*const action = embedHostAction\(e\);/);
-  assert.match(mainSource, /if \(action && shouldForwardHostShortcut\(e\.target, !!document\.querySelector\('\.modal-overlay'\)\?\.isConnected\)\) \{\n\s*e\.preventDefault\(\);\n\s*e\.stopImmediatePropagation\(\);\n\s*requestLidgeHostAction\(action\);\n\s*return;/);
+  assert.match(mainSource, /if \(chromeMode === 'embed'\) \{[\s\S]*?document\.addEventListener\('keydown', \(e\) => \{\n\s*const \{ prevent, forward \} = hostShortcutDecision\(/);
+  assert.match(mainSource, /e, e\.target, !!document\.querySelector\('\.modal-overlay, \.cp-overlay'\)/);
+  assert.match(mainSource, /if \(prevent\) \{\n\s*e\.preventDefault\(\);\n\s*e\.stopImmediatePropagation\(\);\n\s*if \(forward\) requestLidgeHostAction\(forward\);\n\s*return;/);
   assert.match(mainSource, /if \(\(e\.ctrlKey \|\| e\.metaKey\) && !e\.altKey && !e\.shiftKey\n\s*&& \(e\.key\.toLowerCase\(\) === 's' \|\| e\.key === 'ㄴ'\)\) \{\n\s*e\.preventDefault\(\);\n\s*e\.stopImmediatePropagation\(\);\n\s*dispatcher\.dispatch\('file:save'\);\n\s*return;\n\s*\}\n\s*if \(isEmbedSwallowedFileShortcut\(e\)\) e\.preventDefault\(\);\n\s*\}, true\);/);
   // dispatch 대상이 embed에서 등록돼 있어야 한다(미등록 dispatch는 무해한 no-op이다).
   // Save As는 저장 대상 경로를 바꿀 수 있으므로 계속 숨긴다.
@@ -222,6 +225,9 @@ test('embed host shortcuts route physical keys without stealing format copy', ()
   assert.equal(embedHostAction({ ...base, key: 'F2' }), null);
   assert.equal(embedHostAction({ ...base, key: 'c', code: 'KeyC', metaKey: false, altKey: true }), null);
   assert.equal(embedHostAction({ ...base, key: 'Process', code: 'KeyC', shiftKey: true, isComposing: true }), null);
+  assert.equal(embedHostKey({ ...base, key: 'Process', code: 'KeyC', shiftKey: true, isComposing: true }), 'lidge.hostCopyPathRequested');
+  assert.deepEqual(hostShortcutDecision({ ...base, key: 'Process', code: 'KeyC', shiftKey: true,
+    isComposing: true }, null, false), { prevent: true, forward: null });
   assert.equal(embedHostAction({ ...base, key: 'F2', metaKey: false, isComposing: true }), null);
   assert.equal(embedHostAction({ ...base, key: 'c', code: 'KeyC', ctrlKey: true }), null);
 });
@@ -239,6 +245,17 @@ test('embed host shortcuts respect modal and text input ownership', () => {
   const editable = { tagName: 'DIV', isContentEditable: true, parentElement: null,
     getAttribute: () => null, closest: () => null };
   assert.equal(shouldForwardHostShortcut(input('SPAN', false, editable) as unknown as EventTarget, false), false);
+  const copy = { key: 'C', code: 'KeyC', ctrlKey: false, metaKey: true,
+    altKey: false, shiftKey: true };
+  assert.deepEqual(hostShortcutDecision(copy, editorInput as unknown as EventTarget, false),
+    { prevent: true, forward: 'lidge.hostCopyPathRequested' });
+  assert.deepEqual(hostShortcutDecision(copy, input('INPUT', false) as unknown as EventTarget, false),
+    { prevent: true, forward: null });
+  // Command palette overlay is attached even when focus is forced back into editor input.
+  assert.deepEqual(hostShortcutDecision(copy, editorInput as unknown as EventTarget, true),
+    { prevent: true, forward: null });
+  assert.deepEqual(hostShortcutDecision({ ...copy, altKey: true }, editorInput as unknown as EventTarget, false),
+    { prevent: false, forward: null });
 });
 
 test('lidge host actions emit only while a host is connected', () => {

@@ -177,6 +177,22 @@ async function main() {
     await cdp.eval(`document.querySelector('.rename-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));`);
     console.log('PASS F2 reveals filtered document');
 
+    await cdp.eval(`document.querySelector('#doc-filter').focus();`);
+    const searchRename = await cdp.eval(`const input = document.querySelector('#doc-filter');
+      const event = new KeyboardEvent('keydown', { key: 'R', code: 'KeyR', metaKey: true,
+        shiftKey: true, bubbles: true, cancelable: true });
+      input.dispatchEvent(event); return event.defaultPrevented;`);
+    assert.equal(searchRename, true);
+    await until(() => cdp.eval(`return !!document.querySelector('.rename-input');`));
+    const renameInputF2 = await cdp.eval(`const input = document.querySelector('.rename-input');
+      const event = new KeyboardEvent('keydown', { key: 'F2', code: 'F2', bubbles: true, cancelable: true });
+      input.dispatchEvent(event);
+      return { prevented: event.defaultPrevented, input: document.querySelectorAll('.rename-input').length,
+        value: input.value, focus: document.activeElement === input };`);
+    assert.deepEqual(renameInputF2, { prevented: true, input: 1, value: 'b.hwp', focus: true });
+    await cdp.eval(`document.querySelector('.rename-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));`);
+    console.log('PASS search Command-Shift-R opens rename; F2 inside rename input is prevented without action');
+
     await cdp.eval(`document.querySelector('.group-header[data-group="P"]').click();`);
     assert.equal(await cdp.eval(`return document.querySelector('.group-header[data-group="P"]').closest('li').querySelector('.group-docs').hidden;`), true);
     await cdp.eval(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }));`);
@@ -244,7 +260,7 @@ async function main() {
     assert.equal((await state()).inert, true);
     assert.equal((await state()).noDocument, true);
     console.log('PASS HTTP 500 reconciles to quarantined id and leaves editor inert');
-    console.log('Browser checks: 11 passed, 0 failed');
+    console.log('Browser checks: 12 passed, 0 failed');
   } finally {
     cdp?.close();
     if (chrome && chrome.exitCode === null) {
