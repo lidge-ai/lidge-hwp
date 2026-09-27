@@ -12,7 +12,7 @@ permissions:
 jobs:
   app:
     runs-on: macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -22,6 +22,33 @@ jobs:
           node-version: '26'
           cache: npm
       - run: npm ci
+      - name: Install pinned wasm-pack
+        shell: bash
+        run: |
+          case "$(uname -m)" in
+            arm64)
+              target=aarch64-apple-darwin
+              checksum=0abff4a03d670b6c00ea31d0e1608a72407e355f3d3765e9c30eb45cd5b7e318
+              ;;
+            x86_64)
+              target=x86_64-apple-darwin
+              checksum=d3f1a4a33e95f8f0d7801b024e08624c479999ac96aa150908b2394015cd0363
+              ;;
+            *) exit 1 ;;
+          esac
+          archive="$RUNNER_TEMP/wasm-pack.tar.gz"
+          curl --fail --location --retry 3 \
+            "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-$target.tar.gz" \
+            --output "$archive"
+          printf '%s  %s\n' "$checksum" "$archive" | shasum -a 256 --check -
+          mkdir -p "$RUNNER_TEMP/wasm-pack"
+          tar -xzf "$archive" --strip-components=1 -C "$RUNNER_TEMP/wasm-pack"
+          echo "$RUNNER_TEMP/wasm-pack" >> "$GITHUB_PATH"
+      - name: Prepare pinned Rust toolchain
+        working-directory: rhwp
+        run: rustup show
+      - name: Build WASM and Studio required by app tests
+        run: npm run build:studio
       - name: Public unit and contract tests
         # Private document integration fixtures are intentionally not distributed.
         # The test runner reports those as skipped; this job is not the full integration gate.
