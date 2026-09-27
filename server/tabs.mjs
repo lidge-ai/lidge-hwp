@@ -83,6 +83,7 @@ export function createTabs() {
     response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-store', Connection: 'keep-alive' });
     response.write(`event: hello\ndata: ${JSON.stringify({ lease, docId: tab.docId })}\n\n`);
+    if (tab.pendingFollowEnd) { response.write(tab.pendingFollowEnd); tab.pendingFollowEnd = null; }
     tab.timer = setInterval(() => response.write('event: heartbeat\ndata: {}\n\n'), 15000);
     response.on('close', () => release(lease));
     bump();
@@ -199,6 +200,20 @@ export function createTabs() {
     }
     return false;
   }
+  function reservationLease(token) {
+    for (const entry of reservations.values()) if (entry.token === token) return entry.claimLease;
+    return null;
+  }
+  function followEnd(lease, payload) {
+    const tab = byLease.get(lease);
+    if (!tab) return false;
+    const data = `event: agent.followEnd\ndata: ${JSON.stringify({ schemaVersion: 1, type: 'agent.followEnd',
+      docId: tab.docId, leaseId: lease, ...payload })}\n\n`;
+    if (tab.response && !tab.response.writableEnded) {
+      try { tab.response.write(data); } catch { return false; }
+    } else tab.pendingFollowEnd = data;
+    return true;
+  }
   // docId 탭이 SSE로 붙을 때까지 기다린다. reservation이 있으면 그 예약으로 claim한 임대만 인정한다.
   // 실패 코드: 예약 없음 → TAB_CONNECTING(claim이 사라짐·시간 초과),
   //           예약 있음 → FOLLOW_CANCELLED(예약 반납·만료), FOLLOW_LOAD_FAILED(claim 뒤 임대 해제), FOLLOW_TIMEOUT.
@@ -240,5 +255,6 @@ export function createTabs() {
 
   return { claim, owns, owner, claimed, release, events, close, requestAgent, acceptReply,
     agentLockFor, finishAgentSave, saveStatus, waitAgentSave, isIsolated, isolate,
-    followTarget, reserve, cancelReservation, waitConnected, reservedFor, agentExpected, hasRootActivity, canRename };
+    followTarget, reserve, cancelReservation, reservationLease, followEnd,
+    waitConnected, reservedFor, agentExpected, hasRootActivity, canRename };
 }

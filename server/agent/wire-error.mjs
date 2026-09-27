@@ -5,6 +5,11 @@ const CODE = /^[A-Z][A-Z0-9_]{2,63}$/;
 export function wireError(e) {
   const out = { error: String(e?.message ?? e).slice(0, 4096) };
   if (typeof e?.code === 'string' && CODE.test(e.code)) out.code = e.code;
+  if (typeof e?.retryable === 'boolean') out.retryable = e.retryable;
+  if (e?.hashes && typeof e.hashes === 'object') {
+    out.hashes = Object.fromEntries(['snapshotSha256', 'exportSha256', 'tabDiskSha256']
+      .filter(key => typeof e.hashes[key] === 'string').map(key => [key, e.hashes[key]]));
+  }
   if (e?.details !== undefined) {
     let json;
     try { json = JSON.stringify(e.details); } catch { json = undefined; }

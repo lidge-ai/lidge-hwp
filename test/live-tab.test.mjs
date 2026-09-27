@@ -530,7 +530,7 @@ test('(V2) 다른 칸까지 바뀐 탭 바이트는 409 AGENT_VERIFY_MISMATCH, �
 // ── wp5 B: 따라가기 ──
 async function seedTwo(t, agentConfig = {}) {
   const env = await seed(t, { id: 'y.hwp', agentConfig: { followMinMs: 0, ...agentConfig } });
-  await writeFile(join(env.root, 'x.hwp'), HWP_STUB);
+  await writeFile(join(env.root, 'x.hwp'), await blankHwp());
   await git('git', ['-C', env.root, 'add', '--', 'x.hwp']);
   await git('git', ['-C', env.root, '-c', 'user.name=Test', '-c', 'user.email=test@local.invalid', 'commit', '-qm', 'seed x']);
   const y = await connectTab(t, env.base, await claimLease(env.base, 'y.hwp'));
@@ -539,9 +539,7 @@ async function seedTwo(t, agentConfig = {}) {
 const claimWith = (base, docId, reservation) => fetch(`${base}/api/tabs`, { method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(reservation === undefined ? { docId } : { docId, reservation }) });
-// 디스크 경로는 HWP_STUB을 못 연다(CFB 오류). worker는 코드가 잡은 host 실패도 invocation 실패로 세므로(worker.mjs:18,34)
-// 결과는 ok:false다. 볼 것은 follow 결과, 탭 이벤트, 그리고 디스크 경로에 닿았다는 증거인 CFB 오류다.
-const OPEN_X = "try { await hwp.open('x.hwp'); return 'opened'; } catch (e) { return 'open-failed'; }";
+const OPEN_X = "const h=await hwp.open('x.hwp'); await hwp.setCell(h,{table:99,row:0,col:0,text:'x'});";
 const tabStop = async (tab, prepare) => {
   await tab.reply(prepare.requestId, { ok: false, error: { code: 'SIMULATED_TAB_STOP', message: 'SIMULATED_TAB_STOP' } });
   const release = await tab.frame('agent.release');
@@ -577,9 +575,17 @@ test('(F0) tabs: 예약 중에는 그 토큰의 claim 한 번만 통과하고, �
   tabs.close();
 });
 
-test('(F1) 셸이 y를 볼 때 x를 열면 agent.follow → 예약 claim → x 탭으로 prepare (수락)', async t => {
+test('(F1) open+tables는 다른 문서를 보는 셸을 움직이지 않는다', async t => {
+  const { socketPath, y } = await seedTwo(t);
+  const out = await runCode(socketPath, "const h=await hwp.open('x.hwp'); return await hwp.tables(h)");
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.follow, undefined);
+  assert.equal(y.seen.includes('agent.follow'), false);
+});
+
+test('(F7) 첫 변경에서 agent.follow → 예약 claim → x 탭으로 prepare', async t => {
   const { base, socketPath, y } = await seedTwo(t);
-  const response = runCode(socketPath, "await hwp.open('x.hwp'); return 'ok'");
+  const response = runCode(socketPath, OPEN_X);
   const follow = await y.frame('agent.follow');
   assert.equal(follow.docId, 'y.hwp');
   assert.equal(follow.targetDocId, 'x.hwp');
@@ -593,8 +599,187 @@ test('(F1) 셸이 y를 볼 때 x를 열면 agent.follow → 예약 claim → x �
   await tabStop(x, prepare);
   const out = await response;
   assert.match(out.error, /SIMULATED_TAB_STOP/);
-  assert.deepEqual(out.follow, { from: 'y.hwp', to: 'x.hwp', outcome: 'followed' });
+  assert.deepEqual(out.follow, { from: 'y.hwp', to: 'x.hwp', outcome: 'followed', completion: 'none' });
   assert.equal(y.seen.includes('agent.prepare'), false);
+});
+
+test('(F8) follow:false 변경 저장은 y 탭을 유지한다', async t => {
+  const { root, socketPath, y } = await seedTwo(t);
+  const before = await head(root);
+  const out = await runCode(socketPath,
+    "const h=await hwp.open('x.hwp',{follow:false}); await hwp.insertText(h,{paragraph:0,text:'edited'}); await hwp.save(h)");
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.saved.length, 1);
+  assert.notEqual(await head(root), before);
+  assert.equal(out.follow, undefined);
+  assert.equal(y.seen.includes('agent.follow'), false);
+});
+
+test('(F9) 저장 없는 편집은 release 뒤 followEnd none을 보낸다', async t => {
+  const { root, base, socketPath, y, server } = await seedTwo(t);
+  const bytes = await readFile(join(root, 'x.hwp'));
+  const before = await head(root);
+  const run = runCode(socketPath, "const h=await hwp.open('x.hwp'); await hwp.insertText(h,{paragraph:0,text:'unsaved'})");
+  const follow = await y.frame('agent.follow');
+  await y.reply(follow.requestId, { ok: true });
+  const claimed = await claimWith(base, 'x.hwp', follow.reservation);
+  const x = await connectTab(t, base, (await claimed.json()).lease);
+  const prepare = await x.frame('agent.prepare');
+  await x.reply(prepare.requestId, { ok: true, state: tabState('hwp'), diskSha256: sha(bytes),
+    exportSha256: sha(bytes), contentLoss: noLoss('hwp') }, bytes);
+  const release = await x.frame('agent.release');
+  await x.reply(release.requestId, { ok: true });
+  const end = await x.frame('agent.followEnd');
+  const out = await run;
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.follow.completion, 'none');
+  assert.equal(Object.hasOwn(out.follow, 'lease'), false);
+  assert.equal(end.completion, 'none');
+  assert.equal(server.store.isLocked('x.hwp'), false);
+  assert.deepEqual(x.seen.slice(-3), ['agent.prepare', 'agent.release', 'agent.followEnd']);
+  assert.equal(await head(root), before);
+});
+
+test('(F11) followEnd queued during claim is sent just after hello', () => {
+  const tabs = createTabs();
+  const lease = tabs.claim('x.hwp');
+  assert.equal(tabs.followEnd(lease, { from: 'y.hwp', to: 'x.hwp', completion: 'none' }), true);
+  const writes = [];
+  const response = { writeHead() {}, write(value) { writes.push(value); }, on() {}, end() {}, writableEnded: false };
+  tabs.events(lease, response);
+  assert.match(writes[0], /^event: hello/);
+  assert.match(writes[1], /^event: agent.followEnd/);
+  tabs.close();
+});
+
+test('(P1) prepare hash failure retains disk SHA, commit and diagnostics', async t => {
+  const bytes = await blankHwp();
+  const { root, base, socketPath } = await seed(t, { bytes });
+  const tab = await connectTab(t, base, await claimLease(base));
+  const run = runCode(socketPath, "await hwp.open('a.hwp')");
+  const prepare = await tab.frame('agent.prepare');
+  await tab.reply(prepare.requestId, { ok: false, error: { code: 'SNAPSHOT_HASH_MISMATCH',
+    message: 'SNAPSHOT_HASH_MISMATCH', retryable: false,
+    hashes: { snapshotSha256: 'snap', exportSha256: 'export', tabDiskSha256: 'tab' } } });
+  const release = await tab.frame('agent.release');
+  await tab.reply(release.requestId, { ok: true });
+  const out = await run;
+  assert.equal(out.ok, false);
+  assert.equal(out.errorCode, 'SNAPSHOT_HASH_MISMATCH');
+  assert.equal(out.retryable, false);
+  assert.deepEqual(out.hashes, { snapshotSha256: 'snap', exportSha256: 'export', tabDiskSha256: 'tab',
+    diskSha256: sha(bytes) });
+  assert.equal(out.reconciliation.diskSha256, sha(bytes));
+  assert.equal(out.reconciliation.lastCommit, await head(root));
+});
+
+test('(F13) apply reply timeout after committed PUT is committed, never restored', async t => {
+  const { root, base, socketPath, y } = await seedTwo(t, { applyDeadlineMs: 150, releaseDeadlineMs: 1500 });
+  const bytes = await readFile(join(root, 'x.hwp'));
+  const before = await head(root);
+  const run = runCode(socketPath,
+    "const h=await hwp.open('x.hwp'); await hwp.insertText(h,{paragraph:0,text:'committed'}); await hwp.save(h)");
+  const follow = await y.frame('agent.follow');
+  await y.reply(follow.requestId, { ok: true });
+  const claimed = await claimWith(base, 'x.hwp', follow.reservation);
+  const lease = (await claimed.json()).lease;
+  const x = await connectTab(t, base, lease);
+  const prepare = await x.frame('agent.prepare');
+  await x.reply(prepare.requestId, { ok: true, state: tabState('hwp'), diskSha256: sha(bytes),
+    exportSha256: sha(bytes), contentLoss: noLoss('hwp') }, bytes);
+  const apply = await x.frame('agent.apply');
+  const doc = await openDocument(bytes);
+  let edited;
+  try {
+    for (const op of apply.batch.ops) applyOp(doc, newBatch({}), op.kind, op.args);
+    edited = Buffer.from(exportWithReport(doc, 'hwp').bytes);
+  } finally { doc.free(); }
+  const put = await fetch(`${base}/api/docs/x.hwp`, { method: 'PUT', body: edited, headers: {
+    'Content-Type': 'application/octet-stream', 'If-Match': `"${sha(bytes)}"`, 'X-Lease': lease,
+    'X-Document-Format': 'hwp', 'X-Content-Loss-Report': Buffer.from(JSON.stringify(noLoss('hwp'))).toString('base64'),
+    'X-Agent-Request-Id': apply.requestId } });
+  assert.equal(put.status, 200, await put.text());
+  const release = await x.frame('agent.release');
+  await x.reply(release.requestId, { ok: true });
+  const end = await x.frame('agent.followEnd');
+  const out = await run;
+  assert.equal(out.ok, false, JSON.stringify(out));
+  assert.equal(out.error, 'AGENT_REPLY_TIMEOUT');
+  assert.deepEqual(out.saved, []);
+  assert.equal(out.follow.completion, 'committed');
+  assert.equal(Object.hasOwn(out.follow, 'lease'), false);
+  assert.equal(end.completion, 'committed');
+  assert.notEqual(await head(root), before);
+  assert.equal(out.reconciliation.diskSha256, sha(await readFile(join(root, 'x.hwp'))));
+});
+
+test('(F10) disk read failure after follow sends followEnd without prepare', async t => {
+  const { base, socketPath, y, server } = await seedTwo(t);
+  const read = server.store.read;
+  let reads = 0;
+  server.store.read = async id => {
+    if (id === 'x.hwp' && ++reads === 3) throw Object.assign(new Error('READ_AFTER_FOLLOW'), { code: 'EIO' });
+    return read(id);
+  };
+  const run = runCode(socketPath, OPEN_X);
+  const follow = await y.frame('agent.follow');
+  await y.reply(follow.requestId, { ok: true });
+  const claimed = await claimWith(base, 'x.hwp', follow.reservation);
+  const x = await connectTab(t, base, (await claimed.json()).lease);
+  const end = await x.frame('agent.followEnd');
+  const out = await run;
+  assert.equal(out.error, 'READ_AFTER_FOLLOW');
+  assert.equal(out.follow.completion, 'none');
+  assert.equal(end.completion, 'none');
+  assert.equal(x.seen.includes('agent.prepare'), false);
+  assert.equal(server.store.isLocked('x.hwp'), false);
+});
+
+test('(F16) unconfirmed release marks unsaved follow unknown and isolates lease', async t => {
+  const { root, base, socketPath, y, server } = await seedTwo(t, { releaseDeadlineMs: 150 });
+  const bytes = await readFile(join(root, 'x.hwp'));
+  const run = runCode(socketPath, "const h=await hwp.open('x.hwp'); await hwp.insertText(h,{paragraph:0,text:'unsaved'})");
+  const follow = await y.frame('agent.follow');
+  await y.reply(follow.requestId, { ok: true });
+  const claimed = await claimWith(base, 'x.hwp', follow.reservation);
+  const lease = (await claimed.json()).lease;
+  const x = await connectTab(t, base, lease);
+  const prepare = await x.frame('agent.prepare');
+  await x.reply(prepare.requestId, { ok: true, state: tabState('hwp'), diskSha256: sha(bytes),
+    exportSha256: sha(bytes), contentLoss: noLoss('hwp') }, bytes);
+  await x.frame('agent.release'); // deliberately withhold response
+  const end = await x.frame('agent.followEnd');
+  const out = await run;
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.follow.completion, 'unknown');
+  assert.equal(end.completion, 'unknown');
+  assert.equal(server.tabs.isIsolated(lease), true);
+  assert.equal(server.store.isLocked('x.hwp'), false);
+});
+
+test('(F14) zero-range edit followed by save fails and ends follow as none', async t => {
+  const { root, base, socketPath, y } = await seedTwo(t);
+  const bytes = await readFile(join(root, 'x.hwp'));
+  const before = await head(root);
+  const run = runCode(socketPath,
+    "const h=await hwp.open('x.hwp'); await hwp.format(h,{paragraph:0,start:0,end:0},{bold:true}); await hwp.save(h)");
+  const follow = await y.frame('agent.follow');
+  await y.reply(follow.requestId, { ok: true });
+  const claimed = await claimWith(base, 'x.hwp', follow.reservation);
+  const x = await connectTab(t, base, (await claimed.json()).lease);
+  const prepare = await x.frame('agent.prepare');
+  await x.reply(prepare.requestId, { ok: true, state: tabState('hwp'), diskSha256: sha(bytes),
+    exportSha256: sha(bytes), contentLoss: noLoss('hwp') }, bytes);
+  const release = await x.frame('agent.release');
+  await x.reply(release.requestId, { ok: true });
+  const end = await x.frame('agent.followEnd');
+  const out = await run;
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'save requires an edit');
+  assert.equal(out.follow.completion, 'none');
+  assert.equal(end.error, 'save requires an edit');
+  assert.equal(end.completion, 'none');
+  assert.equal(await head(root), before);
 });
 
 test('(F2) 저장 안 한 편집이 있는 셸은 DIRTY로 거절하고 runner는 디스크 경로로 간다', async t => {
@@ -603,7 +788,7 @@ test('(F2) 저장 안 한 편집이 있는 셸은 DIRTY로 거절하고 runner�
   const follow = await y.frame('agent.follow');
   await y.reply(follow.requestId, { ok: false, error: { code: 'DIRTY', message: 'DIRTY' } });
   const out = await response;
-  assert.match(out.error, /CFB/, JSON.stringify(out)); // 디스크 경로로 stub을 열다 실패(탭 경로가 아님)
+  assert.match(out.error, /table|cell|invalid/i, JSON.stringify(out));
   assert.deepEqual(out.follow, { from: 'y.hwp', to: 'x.hwp', outcome: 'declined', code: 'DIRTY' });
   assert.equal((await claimWith(base, 'x.hwp')).status, 201); // 예약은 풀렸다
 });
@@ -637,8 +822,8 @@ test('(F4) 잠금·예약 중 다른 셸 claim·틀린 토큰·사람 PUT은 막
   const { lease } = await mine.json();
   await fetch(`${base}/api/tabs/${lease}`, { method: 'DELETE' }); // 셸의 loadFile 실패(app.mjs catch의 release(next))
   const out = await response;
-  assert.deepEqual(out.follow, { from: 'y.hwp', to: 'x.hwp', outcome: 'failed', code: 'FOLLOW_LOAD_FAILED' });
-  assert.match(out.error, /CFB/, JSON.stringify(out)); // 탭이 없으니 디스크 경로로 열려다 stub에서 실패(탭 경로가 아님)
+  assert.deepEqual(out.follow, { from: 'y.hwp', to: 'x.hwp', outcome: 'failed', code: 'FOLLOW_LOAD_FAILED', completion: 'none' });
+  assert.match(out.error, /table|cell|invalid/i, JSON.stringify(out));
 });
 
 test('(F5) 수락 뒤 claim 전에 셸이 예약을 돌려주면 FOLLOW_CANCELLED → 디스크 경로', async t => {
@@ -649,7 +834,7 @@ test('(F5) 수락 뒤 claim 전에 셸이 예약을 돌려주면 FOLLOW_CANCELLE
   const back = await fetch(`${base}/api/tabs/reservations/${follow.reservation}`, { method: 'DELETE' });
   assert.equal(back.status, 200);
   const out = await response;
-  assert.deepEqual(out.follow, { from: 'y.hwp', to: 'x.hwp', outcome: 'failed', code: 'FOLLOW_CANCELLED' });
+  assert.deepEqual(out.follow, { from: 'y.hwp', to: 'x.hwp', outcome: 'failed', code: 'FOLLOW_CANCELLED', completion: 'none' });
 });
 
 test('(F6) 여는 중인 탭은 붙을 때까지 기다렸다가 그 탭으로 prepare한다', async t => {
@@ -811,7 +996,7 @@ function sendChannelEvent(events, type, requestId, payload = {}) {
 }
 
 function channelHarness(t, { applyError, unlockError, replyGate, canFollow = async () => null,
-    onReply } = {}) {
+    onReply, states = null, exports = null } = {}) {
   const originalFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = originalFetch; });
   const bytes = Uint8Array.of(1);
@@ -819,6 +1004,7 @@ function channelHarness(t, { applyError, unlockError, replyGate, canFollow = asy
   const calls = [], replies = [], statuses = [], saveLocks = [];
   let locked = false;
   let inert = false;
+  let stateReads = 0, exportReads = 0;
   const element = {
     get inert() { return inert; },
     set inert(value) { inert = value; calls.push(`inert=${value}`); },
@@ -832,11 +1018,12 @@ function channelHarness(t, { applyError, unlockError, replyGate, canFollow = asy
         locked = params.on;
         return { locked };
       }
-      if (method === 'exportWithReport') return { bytes, contentLoss: noLoss('hwp') };
+      if (method === 'exportWithReport') return exports ? exports[Math.min(exportReads++, exports.length - 1)]
+        : { bytes, contentLoss: noLoss('hwp') };
       if (method === 'applyOps') throw applyError;
       throw new Error(`unexpected ${method}`);
     } },
-    getDocumentState: async () => ({ documentSha256: sha(bytes) }),
+    getDocumentState: async () => states ? states[Math.min(stateReads++, states.length - 1)] : { documentSha256: sha(bytes) },
     loadFile: async () => { calls.push('loadFile'); },
   };
   globalThis.fetch = async (url, init) => {
@@ -859,6 +1046,40 @@ function channelHarness(t, { applyError, unlockError, replyGate, canFollow = asy
   const prepare = async () => { send('agent.prepare', 'p', { format: 'hwp' }); await channelWait(() => replies.length === 1); };
   return { send, prepare, calls, replies, statuses, saveLocks, editor, stop };
 }
+
+test('(P2) prepare pairs export bytes with state after caret stamp', async t => {
+  const a = Uint8Array.of(1), b = Uint8Array.of(2);
+  const state = hash => ({ documentSha256: hash, documentEpoch: 1, changeSeq: 0 });
+  const f = channelHarness(t, { states: [state(sha(a)), state(sha(b))],
+    exports: [{ bytes: b, contentLoss: noLoss('hwp') }] });
+  await f.prepare();
+  assert.equal(f.replies[0].header.ok, true);
+  assert.equal(f.replies[0].header.exportSha256, sha(b));
+  assert.equal(f.replies[0].header.state.documentSha256, sha(b));
+});
+
+test('(P2 stable) persistent hash mismatch is not retryable and carries both hashes', async t => {
+  const a = Uint8Array.of(1), b = Uint8Array.of(2);
+  const state = { documentSha256: sha(a), documentEpoch: 1, changeSeq: 0 };
+  const f = channelHarness(t, { states: [state, state, state],
+    exports: [{ bytes: b, contentLoss: noLoss('hwp') }, { bytes: b, contentLoss: noLoss('hwp') }] });
+  await f.prepare();
+  assert.equal(f.replies[0].header.ok, false);
+  assert.equal(f.replies[0].header.error.code, 'SNAPSHOT_HASH_MISMATCH');
+  assert.equal(f.replies[0].header.error.retryable, false);
+  assert.equal(f.replies[0].header.error.hashes.snapshotSha256, sha(a));
+  assert.equal(f.replies[0].header.error.hashes.exportSha256, sha(b));
+});
+
+test('(P2 changing) changing prepare reports TAB_CONNECTING as retryable', async t => {
+  const a = Uint8Array.of(1), b = Uint8Array.of(2), c = Uint8Array.of(3);
+  const state = (bytes, seq) => ({ documentSha256: sha(bytes), documentEpoch: 1, changeSeq: seq });
+  const f = channelHarness(t, { states: [state(a, 0), state(a, 0), state(c, 1)],
+    exports: [{ bytes: b, contentLoss: noLoss('hwp') }, { bytes: b, contentLoss: noLoss('hwp') }] });
+  await f.prepare();
+  assert.equal(f.replies[0].header.error.code, 'TAB_CONNECTING');
+  assert.equal(f.replies[0].header.error.retryable, true);
+});
 
 test('wp3 channel 1: ordinary release stays inert until unlock and reply confirmation', async t => {
   const gate = deferred();

@@ -1,5 +1,5 @@
 import { startAgentChannel } from '/agent-channel.mjs';
-import { followSwitch } from '/follow-switch.mjs';
+import { followSwitch, restoreSwitch } from '/follow-switch.mjs';
 import { copyPath } from '/copy-path.mjs';
 import { shellShortcutDecision } from '/shell-shortcuts.mjs';
 import { dispatchHostEvent } from '/host-shortcuts.mjs';
@@ -87,7 +87,9 @@ function openDoc(id, options = {}) {
 
 // 사람 전환은 switchTo를 바로 부른다. AI 전환(agent.follow 수락)은 followSwitch가 전체를 감싸서, 어느 단계에서
 // 던지거나 실패해도 예약 반납·입력 차단 복구·상태줄 알림을 한다(web/follow-switch.mjs).
-function openDocNow(id, { reservation = null, agent = false } = {}) {
+function openDocNow(id, { reservation = null, agent = false, restoreFrom = null, reason = null } = {}) {
+  if (restoreFrom) return restoreSwitch({ id, expectedLease: restoreFrom, currentLease: current?.lease,
+    reason, switchTo, say, nameOf, currentName: () => current ? nameOf(current.id) : null });
   if (!agent) return switchTo(id).catch(error => { say(`열기 실패: ${error.message}`); return false; });
   return followSwitch({ id, reservation, element: studio.element, switchTo, say,
     hasCurrent: () => current !== null,
@@ -96,7 +98,8 @@ function openDocNow(id, { reservation = null, agent = false } = {}) {
 
 // 문서 하나로 바꾼다. 새 문서가 열렸으면 true. AI 전환(agent)은 멈출 이유를 던지고(followSwitch가 정리),
 // 사람 전환은 상태줄에 알리고 false를 돌려준다.
-async function switchTo(id, { reservation = null, agent = false, rethrow = false } = {}) {
+async function switchTo(id, { reservation = null, agent = false, rethrow = false, restore = null } = {}) {
+  if (restore) agent = true;
   if (!studio && !(await studioReady)) {
     setShellState({ kind: 'error', reason: 'STUDIO_FAILED' });
     return false;
@@ -128,7 +131,8 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
     saveButton.disabled = true;
   }
   try {
-    say(agent ? `AI가 ${nameOf(id)}를 편집하려 해서 그 문서로 전환하는 중` : '문서를 여는 중');
+    say(restore ? `AI 작업이 저장 없이 끝나 ${nameOf(id)}로 돌아가는 중`
+      : agent ? `AI가 ${nameOf(id)}를 편집하려 해서 그 문서로 전환하는 중` : '문서를 여는 중');
     const response = await api(docUrl(id));
     const bytes = await response.arrayBuffer();
     const etag = response.headers.get('ETag');
@@ -177,6 +181,12 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
       canFollow: async () => saving ? 'SAVING' : opening > 0 ? 'BUSY'
         : (await studio.getDocumentState()).dirty ? 'DIRTY' : null,
       onFollow: (targetId, token) => openDoc(targetId, { reservation: token, agent: true }),
+      onFollowEnd: msg => {
+        if (current?.lease !== lease) return;
+        if (msg.completion === 'committed') return say(`AI 편집 저장됨 · ${nameOf(id)}${msg.commit ? ' · 커밋 ' + msg.commit : ''}`);
+        if (msg.completion === 'unknown') return say(`AI 작업 결과 확인 필요(${msg.error ?? '알 수 없음'}) · 이 문서에 남습니다`);
+        if (msg.completion === 'none') return openDoc(msg.from, { restoreFrom: lease, reason: msg.error ?? '변경 없음' });
+      },
     });
     current = next;
     syncCopyPathButton();
@@ -191,7 +201,8 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
     activeButton?.scrollIntoView({ block: 'nearest' });
     if (openHadListFocus) activeButton?.focus();
     openHadListFocus = false;
-    say(agent ? '열림 · AI 편집 대기 중' : '열림');
+    say(restore ? `${nameOf(id)}로 돌아옴 · AI 작업은 저장 없이 끝남(${restore.reason})`
+      : agent ? '열림 · AI 편집 대기 중' : '열림');
     return true;
   } catch (error) {
     // AI 전환이면 runner가 FOLLOW_LOAD_FAILED로 알아채고, followSwitch가 예약을 돌려준다.

@@ -23,6 +23,22 @@ const RELEASE_DEADLINE_MS = 45000;
 const FOLLOW_MAX_MS = 15000, FOLLOW_CODE_RESERVE_MS = 5000, FOLLOW_MIN_MS = 2000;
 const PREPARE_MAX_MS = 30000, PREPARE_CODE_RESERVE_MS = 2000, PREPARE_MIN_MS = 1000;
 
+export function followCompletion({ saved, source, disk, diskError, applySave, tabConfirmed }) {
+  if (saved.length || applySave === 'committed') return 'committed';
+  if (applySave === 'pending' || applySave === 'unknown') return 'unknown';
+  if (!source) return 'none';
+  if (diskError || !disk) return 'unknown';
+  if (disk.sha256 !== source.sha256) return 'committed';
+  return tabConfirmed === false ? 'unknown' : 'none';
+}
+
+export function projectResult(result, follow) {
+  if (!follow) return result;
+  const { from, to, outcome, code, completion } = follow;
+  return { ...result, follow: { from, to, outcome,
+    ...(code !== undefined ? { code } : {}), ...(completion !== undefined ? { completion } : {}) } };
+}
+
 export async function runAgent({ code, timeoutMs = 30000 },
     { store, tabs, config }) {
   const start = Date.now();
@@ -36,7 +52,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
   if (typeof code !== 'string' || !code.trim() || Buffer.byteLength(code) > 65536 ||
       !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000)
     return { ok: false, error: 'invalid code or timeoutMs', logs: [], elapsedMs: Date.now() - start, saved: [] };
-  let state, lockToken, closed = false, worker, timer;
+  let state, lockToken, closed = false, worker, timer, attemptedDocId = null, applyRequestId = null;
   let opened = false; // 한 invocation에 open은 성공·실패와 무관하게 한 번만 허용한다
   let prepareLease = null, prepareToken = null; // 탭 잠금 토큰(= prepare requestId). 실패해도 finally가 release한다
   // 탭 해제는 한 번만. 성공 반환 전과 finally가 같은 promise를 쓰고, 문서 잠금은 이것이 끝난 뒤에만 푼다.
@@ -80,6 +96,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
         return null;
       }
       const lease = await tabs.waitConnected(id, { reservation, ms: followEnd - Date.now() });
+      follow.lease = lease;
       follow.outcome = 'followed';
       return lease;
     } catch (error) {
@@ -87,7 +104,64 @@ export async function runAgent({ code, timeoutMs = 30000 },
       follow.outcome = 'failed'; follow.code = error.code || error.message;
       if (tabs.owner(id) || tabs.claimed?.(id)) throw new Error('TAB_CONNECTING'); // 셸이 X를 쥔 채 남았다: 디스크에 쓰지 않는다
       return null;
-    } finally { tabs.cancelReservation(reservation); }
+    } finally {
+      follow.lease ??= tabs.reservationLease?.(reservation) ?? null;
+      tabs.cancelReservation(reservation);
+    }
+  }
+  const waitMs = () => Math.min(config.followMaxMs ?? FOLLOW_MAX_MS, left(FOLLOW_CODE_RESERVE_MS));
+  async function prepareAndVerify(lease, disk) {
+    if (tabs.isIsolated?.(lease)) throw new Error('LEASE_ISOLATED');
+    const prepareMs = Math.min(PREPARE_MAX_MS, left(PREPARE_CODE_RESERVE_MS));
+    if (prepareMs < PREPARE_MIN_MS) throw new Error('NO_TIME_FOR_PREPARE');
+    prepareLease = lease;
+    let prepared;
+    try { prepared = await tabs.requestAgent(lease, 'agent.prepare', { format: disk.format }, prepareMs); }
+    catch (error) { prepareToken = error.requestId ?? null; throw error; }
+    prepareToken = prepared.requestId;
+    if (prepared.state?.format !== disk.format) throw new Error('FORMAT_MISMATCH');
+    if (prepared.contentLoss.count > 0 && prepared.state.dirty) throw new Error('DIRTY_TAB_KORDOC_UNSAFE');
+    if (prepared.diskSha256 !== disk.sha256) throw new Error('ETAG_MISMATCH');
+    if (sha(prepared.bytes) !== prepared.exportSha256) {
+      throw Object.assign(new Error('SNAPSHOT_HASH_MISMATCH'), { code: 'SNAPSHOT_HASH_MISMATCH', retryable: false,
+        hashes: { snapshotSha256: prepared.state?.documentSha256 ?? null,
+          exportSha256: sha(prepared.bytes), tabDiskSha256: prepared.diskSha256 } });
+    }
+    return prepared;
+  }
+  async function followBeforeMutation() {
+    if (state.followPrepareFailed) throw new Error('FOLLOW_PREPARE_FAILED');
+    if (!state.pendingFollow || state.batch.ops.length) return;
+    state.pendingFollow = false;
+    if (!state.followAllowed) return;
+    if (!tabs.followTarget?.(state.id)) return;
+    try {
+      const disk = await store.read(state.id);
+      if (disk.sha256 !== state.source.sha256) throw new Error('ETAG_MISMATCH');
+      const lease = await followShell(state.id, waitMs());
+      if (!lease) return;
+      const currentDisk = await store.read(state.id);
+      if (currentDisk.sha256 !== disk.sha256) throw new Error('ETAG_MISMATCH');
+      const prepared = await prepareAndVerify(lease, currentDisk);
+      const source = { bytes: prepared.contentLoss.count > 0 ? disk.bytes : prepared.bytes,
+        sha256: disk.sha256, format: disk.format };
+      const doc = await openDoc(source.bytes);
+      state.pages.close();
+      state.doc.free();
+      state.doc = doc;
+      state.source = source;
+      state.lease = lease;
+      state.prepared = prepared;
+      state.batch = newBatch({ diskSha256: source.sha256,
+        documentEpoch: prepared.state.documentEpoch, changeSeq: prepared.state.changeSeq,
+        exportSha256: prepared.exportSha256 });
+      state.pages = createPageView({ source, getGen: () => state.batch.ops.length, getDoc: () => state.doc,
+        format: source.format, exporter, openDocument: openDoc, cliPageCount: config.cliPageCount ?? cliPageCountOf,
+        rhwpBin, deadline });
+    } catch (error) {
+      state.followPrepareFailed = true;
+      throw error;
+    }
   }
   const active = new Set();
   const saved = [];
@@ -102,40 +176,35 @@ export async function runAgent({ code, timeoutMs = 30000 },
     if (name === 'selectAll') return selectAll();
     if (name === 'open') {
       const id = args[0];
+      const options = args[1] ?? {};
+      if (!options || typeof options !== 'object' || Array.isArray(options)
+          || Object.keys(options).some(key => key !== 'follow')
+          || (options.follow !== undefined && typeof options.follow !== 'boolean'))
+        throw new Error('OPEN_OPTIONS_INVALID');
       if (opened) {
         // 같은 호출에서 같은 문서를 다시 열면 기존 핸들을 준다(잠금·follow·prepare를 다시 하지 않는다). 다른 문서와 실패한 첫 open 뒤는 거절한다.
-        if (state && id === state.id) return state.handle;
+        if (state && id === state.id) {
+          if ((options.follow !== false) !== state.followAllowed) throw new Error('OPEN_FOLLOW_CONFLICT');
+          return state.handle;
+        }
         throw new Error('one document per invocation');
       }
       opened = true; // 비동기 작업 전에 자리를 먼저 잡는다
       await store.resolveId(id);
+      attemptedDocId = id;
       lockToken = store.lock(id);
       if (!lockToken) throw new Error('DOCUMENT_LOCKED');
       let source, doc, lease = null, prepared = null;
       try {
         // 기다림 한도: 한 마감에서 prepare와 코드 몫(5초)을 남긴 나머지, 최대 15초.
-        const waitMs = () => Math.min(config.followMaxMs ?? FOLLOW_MAX_MS, left(FOLLOW_CODE_RESERVE_MS));
         if (tabs.claimed?.(id)) {
           // 여는 중인 탭: 붙기를 기다린다. 끝내 못 붙으면 디스크에 쓰지 않고 실패한다(곧 사람 편집이 시작될 바이트다).
           lease = await tabs.waitConnected(id, { ms: waitMs() }).catch(() => { throw new Error('TAB_CONNECTING'); });
         } else lease = tabs.owner(id);
-        // 탭이 없으면 다른 문서를 보는 셸을 이 문서로 데려온다. 못 데려오면 null → 디스크 경로(아래 72행).
-        if (!lease) lease = await followShell(id, waitMs());
         if (lease && tabs.isIsolated?.(lease)) throw new Error('LEASE_ISOLATED');
         const disk = await store.read(id);
         if (lease) {
-          // prepare도 같은 마감 안에서만 기다린다: min(30초, 마감 − 지금 − 2초). 1초도 안 남으면 탭에 닿기 전에 멈춘다
-          // (prepareToken이 없으므로 78행이 문서 잠금을 바로 푼다).
-          const prepareMs = Math.min(PREPARE_MAX_MS, left(PREPARE_CODE_RESERVE_MS));
-          if (prepareMs < PREPARE_MIN_MS) throw new Error('NO_TIME_FOR_PREPARE');
-          prepareLease = lease;
-          try { prepared = await tabs.requestAgent(lease, 'agent.prepare', { format: disk.format }, prepareMs); }
-          catch (error) { prepareToken = error.requestId ?? null; throw error; }
-          prepareToken = prepared.requestId;
-          if (prepared.state?.format !== disk.format) throw new Error('FORMAT_MISMATCH');
-          if (prepared.contentLoss.count > 0 && prepared.state.dirty) throw new Error('DIRTY_TAB_KORDOC_UNSAFE');
-          if (prepared.diskSha256 !== disk.sha256) throw new Error('ETAG_MISMATCH');
-          if (sha(prepared.bytes) !== prepared.exportSha256) throw new Error('SNAPSHOT_HASH_MISMATCH');
+          prepared = await prepareAndVerify(lease, disk);
           source = { bytes: prepared.contentLoss.count > 0 ? disk.bytes : prepared.bytes,
             sha256: disk.sha256, format: disk.format };
         } else source = disk;
@@ -148,7 +217,8 @@ export async function runAgent({ code, timeoutMs = 30000 },
         throw error;
       }
       const handle = randomUUID();
-      state = { id, handle, source, doc, lease, prepared, batch: newBatch({ diskSha256: source.sha256,
+      state = { id, handle, source, doc, lease, prepared, pendingFollow: !lease,
+        followAllowed: options.follow !== false, batch: newBatch({ diskSha256: source.sha256,
         documentEpoch: prepared?.state.documentEpoch ?? null, changeSeq: prepared?.state.changeSeq ?? null,
         exportSha256: prepared?.exportSha256 ?? null }), save: false };
       state.pages = createPageView({ source, getGen: () => state.batch.ops.length, getDoc: () => state.doc,
@@ -160,6 +230,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
     if (name === 'save') { state.save = true; return { queued: true }; }
     if (Object.hasOwn(MUTATE_HELPERS, name)) {
       if (state.save) throw new Error('mutation after save');
+      await followBeforeMutation();
       return MUTATE_HELPERS[name](state.doc, state.batch, args[1], args[2]);
     }
     if (name === 'getFormat') return getFormat(state.doc, args[1]);
@@ -182,6 +253,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
       if (typeof method !== 'string') throw new Error('API_METHOD_DENIED: method name required');
       if (Object.hasOwn(REGISTRY, method) && REGISTRY[method].mode === 'mutate') {
         if (state.save) throw new Error('mutation after save');
+        await followBeforeMutation();
         return applyCall(state.doc, state.batch, method, rest);
       }
       if (['pageCount', 'getPageText', 'getDocumentInfo'].includes(method)) return state.pages.read(method, rest);
@@ -190,15 +262,18 @@ export async function runAgent({ code, timeoutMs = 30000 },
     if (name === 'setCell' || name === 'insertText') {
       // splitLines(#28)·format(#30) 옵션을 기존 op로 풀어 쓴다(lib/text-helpers.mjs). 옵션이 없으면 applyOp와 같다.
       if (state.save) throw new Error('mutation after save');
+      await followBeforeMutation();
       return (name === 'setCell' ? setCellHelper : insertTextHelper)(state.doc, state.batch, args[1]);
     }
     if (['insertTextInCell','replaceText','setCheckbox'].includes(name)) {
       if (state.save) throw new Error('mutation after save');
+      await followBeforeMutation();
       return applyOp(state.doc, state.batch, name, args[1]);
     }
     if (name === 'info' || name === 'text') return state.pages.read(name, [args[1]]);
     return readView(state.doc, name, args[1]);
   };
+  let result = null, releasedTab = null;
   try {
     const out = await new Promise(resolve => {
       worker = new Worker(new URL('./worker.mjs', import.meta.url),
@@ -224,12 +299,16 @@ export async function runAgent({ code, timeoutMs = 30000 },
     await Promise.allSettled([...active]);
     if (!out.ok) {
       if (state?.lease) await tabs.waitAgentSave?.(state.lease);
-      const disk = state?.id ? await store.read(state.id).catch(() => null) : null;
-      const commit = state?.id ? await historyFor(state.id)
-        .then(history => lastCommit(history, state.id)).catch(() => null) : null;
-      return { ...out, logs: out.logs ?? [], elapsedMs: Date.now() - start, saved,
-        reconciliation: { diskSha256: disk?.sha256 ?? null, lastCommit: commit }, ...(follow ? { follow } : {}) };
-    }
+      const id = state?.id ?? attemptedDocId;
+      let diskReadError = null;
+      const disk = id ? await store.read(id).catch(error => { diskReadError = error.code ?? error.message; return null; }) : null;
+      const commit = id ? await historyFor(id).then(history => lastCommit(history, id)).catch(() => null) : null;
+      result = { ...out, logs: out.logs ?? [], elapsedMs: Date.now() - start, saved,
+        ...(out.code ? { errorCode: out.code } : {}),
+        ...(out.hashes ? { hashes: { ...out.hashes, diskSha256: disk?.sha256 ?? null } } : {}),
+        reconciliation: { diskSha256: disk?.sha256 ?? null, lastCommit: commit,
+          ...(diskReadError ? { diskReadError } : {}) } };
+    } else {
     if (state?.save) {
       validateBatch(state.batch);
       if (!state.batch.ops.length) throw new Error('save requires an edit');
@@ -258,9 +337,13 @@ export async function runAgent({ code, timeoutMs = 30000 },
           try { signature = contentSignature(reopened); } finally { reopened.free(); }
           if (signature.status !== 'ok') throw new Error(`SIGNATURE_UNSUPPORTED: ${signature.reasons.slice(0, 3).join('; ')}`);
           const token = state.prepared.requestId;
-          const applied = await tabs.requestAgent(state.lease, 'agent.apply', {
-            format: state.source.format, token, batch: { ...state.batch, token },
-          }, 120000, lockToken, { exportSha256: sha(reported.bytes), signature });
+          let applied;
+          try {
+            applied = await tabs.requestAgent(state.lease, 'agent.apply', {
+              format: state.source.format, token, batch: { ...state.batch, token },
+            }, config.applyDeadlineMs ?? 120000, lockToken, { exportSha256: sha(reported.bytes), signature });
+          } catch (error) { applyRequestId = error.requestId ?? null; throw error; }
+          applyRequestId = applied.requestId;
           saved.push({ docId: state.id, commit: applied.save.commit, engine: 'rhwp', verify: applied.save.verify });
         }
       } else {
@@ -286,25 +369,46 @@ export async function runAgent({ code, timeoutMs = 30000 },
     }
     // 결과를 돌려주기 전에 탭 해제를 끝낸다. 커밋은 됐는데 탭이 옛 문서이거나 해제가 확인되지 않으면 알린다.
     const tab = await releaseTab();
-    return { ok: true, result: out.result ?? null, logs: out.logs ?? [],
+    result = { ok: true, result: out.result ?? null, logs: out.logs ?? [],
       elapsedMs: Date.now() - start, saved,
-      ...(saved.length && (tab.reloadRequired || !tab.confirmed) ? { reloadRequired: true } : {}),
-      ...(follow ? { follow } : {}) };
+      ...(saved.length && (tab.reloadRequired || !tab.confirmed) ? { reloadRequired: true } : {}) };
+    }
   } catch (e) {
     // A timed-out reply may follow a successful commit. Reconcile; never replay the batch.
     if (state?.lease) await tabs.waitAgentSave?.(state.lease);
-    const disk = state?.id ? await store.read(state.id).catch(() => null) : null;
-    const commit = state?.id ? await historyFor(state.id)
-      .then(history => lastCommit(history, state.id)).catch(() => null) : null;
-    return { ok: false, ...wireError(e), logs: [], elapsedMs: Date.now() - start,
-      saved, reconciliation: { diskSha256: disk?.sha256 ?? null, lastCommit: commit }, ...(follow ? { follow } : {}) };
+    const id = state?.id ?? attemptedDocId;
+    let diskReadError = null;
+    const disk = id ? await store.read(id).catch(error => { diskReadError = error.code ?? error.message; return null; }) : null;
+    const commit = id ? await historyFor(id).then(history => lastCommit(history, id)).catch(() => null) : null;
+    result = { ok: false, ...wireError(e), ...(e?.code ? { errorCode: e.code } : {}),
+      ...(e?.hashes ? { hashes: { ...e.hashes, diskSha256: disk?.sha256 ?? null } } : {}),
+      logs: [], elapsedMs: Date.now() - start,
+      saved, reconciliation: { diskSha256: disk?.sha256 ?? null, lastCommit: commit,
+        ...(diskReadError ? { diskReadError } : {}) } };
   } finally {
     closed = true; clearTimeout(timer);
     if (worker) await worker.terminate().catch(() => {});
     // prepare가 성공했든 실패했든(requestId가 있으면) 탭 해제가 끝난 뒤에만 문서 잠금을 푼다.
     // releaseTab()이 waitAgentSave를 먼저 기다린다. 격리된 임대에도 release를 보낸다.
-    await releaseTab();
+    releasedTab = await releaseTab();
+    if (follow && (follow.outcome === 'followed' || follow.outcome === 'failed')) {
+      if (follow.outcome === 'failed') follow.completion = 'none';
+      else {
+        let disk = null, diskError = null;
+        if (state) disk = await store.read(state.id).catch(error => { diskError = error.code ?? error.message; return null; });
+        const applySave = applyRequestId && state?.lease
+          ? (tabs.saveStatus?.(applyRequestId, state.lease)?.body?.state ?? null) : null;
+        follow.completion = followCompletion({ saved, source: state?.source ?? null, disk, diskError,
+          applySave, tabConfirmed: releasedTab.confirmed });
+      }
+    }
     try { state?.pages?.close(); }
     finally { state?.doc.free(); lockToken?.release(); }
+    if (follow?.lease && follow.completion) {
+      tabs.followEnd?.(follow.lease, { from: follow.from, to: follow.to, completion: follow.completion,
+        ok: result?.ok === true, error: result?.ok ? null : (result?.error ?? 'EXEC_ABORTED'),
+        commit: saved.at(-1)?.commit ?? result?.reconciliation?.lastCommit ?? null });
+    }
   }
+  return projectResult(result ?? { ok: false, error: 'EXEC_ABORTED', logs: [], elapsedMs: Date.now() - start, saved }, follow);
 }

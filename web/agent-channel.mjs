@@ -1,5 +1,5 @@
 export function startAgentChannel({ editor, events, docId, lease, getDiskSha, setDiskSha, putDocument, showStatus, setSaveLocked,
-    canFollow = async () => 'BUSY', onFollow = () => {} }) {
+    canFollow = async () => 'BUSY', onFollow = () => {}, onFollowEnd = () => {} }) {
   let active = null;        // 잠금을 쥔 prepare requestId(= 잠금 토큰)
   let applyState = null;    // agent.apply 진행 상태 {applied, saved, putStarted, token}
   let isolated = false;     // 되돌리기까지 실패하거나 적용 여부를 모르면 true. 잠금·저장 차단 유지, 새로고침만 복구
@@ -37,10 +37,24 @@ export function startAgentChannel({ editor, events, docId, lease, getDiskSha, se
         active = msg.requestId;
         await editor.lidge.request('lockInput', { on: true, reason: 'AI가 문서를 편집 중입니다', token: active });
         setSaveLocked(true);
-        const state = await editor.getDocumentState();
-        const exported = await editor.lidge.request('exportWithReport', { format: msg.format });
-        const exportSha256 = await digest(exported.bytes);
-        if (exported.contentLoss.count === 0 && exportSha256 !== state.documentSha256) throw new Error('SNAPSHOT_HASH_MISMATCH');
+        const before = await editor.getDocumentState();
+        let exported = await editor.lidge.request('exportWithReport', { format: msg.format });
+        let state = await editor.getDocumentState();
+        let exportSha256 = await digest(exported.bytes);
+        if (exported.contentLoss.count === 0 && exportSha256 !== state.documentSha256) {
+          const first = { state, exportSha256 };
+          exported = await editor.lidge.request('exportWithReport', { format: msg.format });
+          state = await editor.getDocumentState();
+          exportSha256 = await digest(exported.bytes);
+          if (exported.contentLoss.count === 0 && exportSha256 !== state.documentSha256) {
+            const changing = before.documentEpoch !== state.documentEpoch || before.changeSeq !== state.changeSeq
+              || first.state.documentEpoch !== state.documentEpoch || first.state.changeSeq !== state.changeSeq
+              || first.state.documentSha256 !== state.documentSha256 || first.exportSha256 !== exportSha256;
+            const code = changing ? 'TAB_CONNECTING' : 'SNAPSHOT_HASH_MISMATCH';
+            throw Object.assign(new Error(code), { code, retryable: changing,
+              hashes: { snapshotSha256: state.documentSha256, exportSha256, tabDiskSha256: getDiskSha() } });
+          }
+        }
         await reply(msg.requestId, { schemaVersion: 1, requestId: msg.requestId, ok: true, state, diskSha256: getDiskSha(),
           exportSha256, contentLoss: exported.contentLoss, bytesLength: exported.bytes.length }, exported.bytes);
       } else if (msg.type === 'agent.apply') {
@@ -122,6 +136,7 @@ export function startAgentChannel({ editor, events, docId, lease, getDiskSha, se
         if (!rollback.ok) isolated = true;
       }
       if (isolated) showStatus(`AI 편집 결과를 확정할 수 없음 (${causeCode ?? code}: ${causeMessage ?? message}) · 이 탭은 잠긴 채 격리됨 · 새로고침으로 복구`);
+      else if (msg.type === 'agent.apply' && applyState?.saved) showStatus(`AI 편집은 저장됨 · 응답 확인 실패(${code})`);
       else showStatus(`AI 편집 실패: ${message}`);
       // 연결이 끊긴 뒤 apply가 확정 실패로 끝났다면 release가 오지 않으므로 스스로 푼다.
       if (msg.type === 'agent.apply' && disconnected && !isolated && active) {
@@ -130,6 +145,8 @@ export function startAgentChannel({ editor, events, docId, lease, getDiskSha, se
       }
       await reply(msg.requestId, { schemaVersion: 1, requestId: msg.requestId, ok: false,
         error: { code, message, recovered: error?.recovered ?? null,
+          ...(error?.retryable !== undefined ? { retryable: error.retryable } : {}),
+          ...(error?.hashes ? { hashes: error.hashes } : {}),
           ...(cause ? { causeCode, causeMessage } : {}) },
         tab: { applied: Boolean(applyState?.applied), committed: Boolean(applyState?.saved), rollback, isolated },
       }).catch(e => showStatus(`응답 전송 실패: ${e.message}`));
@@ -257,6 +274,13 @@ export function startAgentChannel({ editor, events, docId, lease, getDiskSha, se
     releaseDone = applyDone.then(() => handleRelease(msg), () => handleRelease(msg)).catch(() => {});
   });
   events.addEventListener('agent.follow', event => { void handleFollow(JSON.parse(event.data)); });
+  events.addEventListener('agent.followEnd', event => {
+    const msg = JSON.parse(event.data);
+    releaseDone = releaseDone.then(() => {
+      if (msg.docId !== docId || msg.leaseId !== lease || isolated || reloadRequired) return;
+      return onFollowEnd(msg);
+    }).catch(() => {});
+  });
   events.onerror = () => {
     events.close();
     // 진행 중인 apply가 있으면(저장 확정 전) 표시만 하고 잠금을 유지한다. 되돌리기·저장 확정·해제·격리는 apply 처리기가 정한다.

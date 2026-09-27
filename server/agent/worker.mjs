@@ -12,7 +12,9 @@ parentPort.on('message', msg => {
   pending.delete(msg.id);
   // host 오류의 code·details를 되살린다. 코드가 잡아도 실패로 남고(아래 failures), 최종 out에 그대로 실린다.
   msg.error ? p.reject(Object.assign(new Error(msg.error), msg.code ? { code: msg.code } : {},
-    msg.details !== undefined ? { details: msg.details } : {})) : p.resolve(msg.value);
+    msg.details !== undefined ? { details: msg.details } : {},
+    msg.retryable !== undefined ? { retryable: msg.retryable } : {},
+    msg.hashes ? { hashes: msg.hashes } : {})) : p.resolve(msg.value);
 });
 function call(name, args) {
   if (pending.size >= 128) throw new Error('too many host calls');
