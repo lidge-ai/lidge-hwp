@@ -26,3 +26,14 @@ Aside로 QA를 돌리다 나온 MCP 문제 두 개와, 문서함을 더 편하�
 각 이슈의 완료 기준은 로컬 `npm test` 실패 0, 수동 CI(`gh workflow run ci.yml --ref <branch>`) 성공이다.
 화면이 바뀌는 이슈는 테스트 서버를 브라우저로 열어 실제 동작을 확인한다.
 
+## 2026-09-28 이슈 묶음 (#22~#30)
+
+작업 브랜치는 `dev`에서 따고 PR도 `dev`로 보낸다. 묶음마다 PR 하나.
+
+| 순서 | 이슈 | 내용 |
+|---|---|---|
+| 1 | [#26](https://github.com/lidge-ai/lidge-hwp/issues/26) [#27](https://github.com/lidge-ai/lidge-hwp/issues/27) [#28](https://github.com/lidge-ai/lidge-hwp/issues/28) [#29](https://github.com/lidge-ai/lidge-hwp/issues/29) [#30](https://github.com/lidge-ai/lidge-hwp/issues/30) | MCP helper: 간격 단위(pt 선택), help의 `hwp.` 접두사, 여러 줄 입력과 invalid text 위치, `replaceText` n번째·범위와 일치 위치 보고, `setCell` 글자 모양 선택 |
+| 2 | [#24](https://github.com/lidge-ai/lidge-hwp/issues/24) [#25](https://github.com/lidge-ai/lidge-hwp/issues/25) | 탭 연동: 읽기·실패 호출은 사용자 탭을 끌고 가지 않고(`{follow:false}`, 원복), 새로고침 직후 해시 불일치는 재시도 가능한 코드와 해시를 담아 보고 |
+| 3 | [#22](https://github.com/lidge-ai/lidge-hwp/issues/22) [#23](https://github.com/lidge-ai/lidge-hwp/issues/23) | 엔진: 글자 크기 변경이 쪽 나눔을 만들지 않게, 편집 뒤 쪽 수를 스냅숏과 같은 기준으로. WASM·CLI 재빌드 |
+
+서식·쪽 배치가 바뀌는 수정은 저장한 복사본을 한컴 한글에서 열어 쪽 수와 모양을 대조한다.
