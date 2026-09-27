@@ -23,7 +23,10 @@ async function seed(t, { id = 'a.hwp', bytes = HWP_STUB, agentConfig = {} } = {}
   await git('git', ['-C', root, 'init', '-q']);
   await git('git', ['-C', root, 'add', '--', id]);
   await git('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@local.invalid', 'commit', '-qm', 'seed']);
-  const server = await createServer({ docsRoot: root, agentConfig: { ...agentConfig, socketPath: join(root, 'agent.sock') } });
+  const stateDir = await mkdtemp(join(tmpdir(), 'lidge-hwp-state-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  const server = await createServer({ docsRoot: root, stateDir,
+    agentConfig: { ...agentConfig, socketPath: join(root, 'agent.sock') } });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   // SSE 연결이 열려 있으면 server.close()가 끝나지 않는다. 남은 연결을 닫아 'close'(tabs.close·socket.close)까지 가게 한다.
   t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));

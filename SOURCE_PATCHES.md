@@ -17,6 +17,7 @@ unmodified mirror of that fork. Original copyright and license notices are retai
   are not distributed. The old private Git objects and refs are not imported.
 - Build paths are remapped in published native/WASM artifacts. `BUILD.json` records the
   CLI checksum and source asset checksums rather than claiming the fork base is unchanged.
+- External library-root registration and shadow Git history are application storage features under `lib/` and `server/`. They do not modify the vendored `rhwp/` fork or write Git metadata into a selected document folder.
 - The vendored Studio embed adds recovered:true markers to three pre-dispatch lidge.applyOps rejections (invalid router parameters, missing negotiated capability, failed initial state read). Existing post-dispatch snapshot-rollback recovery is unchanged. The host preserves apply failure causes, serializes the next prepare behind release, and unlocks input before acknowledging release.
 
 Font license source files and per-font attribution are included under
