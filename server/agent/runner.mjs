@@ -92,9 +92,13 @@ export async function runAgent({ code, timeoutMs = 30000 },
     if (name === 'help') return apiHelp(HELPERS);
     if (name === 'selectAll') return selectAll();
     if (name === 'open') {
-      if (opened) throw new Error('one document per invocation');
-      opened = true; // 비동기 작업 전에 자리를 먼저 잡는다
       const id = args[0];
+      if (opened) {
+        // 같은 호출에서 같은 문서를 다시 열면 기존 핸들을 준다(잠금·follow·prepare를 다시 하지 않는다). 다른 문서와 실패한 첫 open 뒤는 거절한다.
+        if (state && id === state.id) return state.handle;
+        throw new Error('one document per invocation');
+      }
+      opened = true; // 비동기 작업 전에 자리를 먼저 잡는다
       await store.resolveId(id);
       lockToken = store.lock(id);
       if (!lockToken) throw new Error('DOCUMENT_LOCKED');

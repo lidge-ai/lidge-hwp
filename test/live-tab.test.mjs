@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { once } from 'node:events';
 import { createServer } from '../server/index.mjs';
 import { createTabs } from '../server/tabs.mjs';
-import { openDocument, exportWithReport } from '../lib/rhwp-node.mjs';
+import { openDocument, exportWithReport, rhwpModule } from '../lib/rhwp-node.mjs';
 import { applyOp, newBatch } from '../lib/ops.mjs';
 const git = promisify(execFile);
 const HWP_STUB = Buffer.from('d0cf11e0a1b11ae100010203', 'hex');
@@ -46,6 +46,93 @@ test('reply header의 bytesLength는 실제 이진 길이와 같아야 한다', 
   const frame = Buffer.concat([Buffer.from(JSON.stringify({ bytesLength: bytes.length }) + '\n'), bytes]);
   const split = frame.indexOf(10);
   assert.equal(frame.subarray(split + 1).length, JSON.parse(frame.subarray(0, split).toString('utf8')).bytesLength);
+});
+
+// wp2: 빌드된 WASM으로 만든 빈 HWP. HWP_STUB는 rhwp로 열리지 않으므로 탭 없는 디스크 경로 테스트에 쓴다.
+async function blankHwp() {
+  const { HwpDocument } = await rhwpModule();
+  const doc = HwpDocument.createEmpty();
+  try {
+    doc.createBlankDocument();
+    const exported = exportWithReport(doc, 'hwp');
+    assert.equal(exported.report.count, 0);
+    return Buffer.from(exported.bytes);
+  } finally { doc.free(); }
+}
+
+test('wp2: 같은 id 재open은 같은 핸들이고 한 번만 prepare/release한다', async t => {
+  const bytes = await blankHwp();
+  const { root, base, socketPath } = await seed(t, { bytes });
+  const lease = await claimLease(base);
+  const tab = await connectTab(t, base, lease);
+  const before = await head(root);
+  const run = runCode(socketPath, "const a=await hwp.open('a.hwp'); const b=await hwp.open('a.hwp'); return {same:a===b,handle:a}");
+  const prepare = await tab.frame('agent.prepare');
+  assert.equal((await tab.reply(prepare.requestId, { ok: true, state: tabState('hwp'),
+    diskSha256: sha(bytes), exportSha256: sha(bytes), contentLoss: noLoss('hwp') }, bytes)).status, 204);
+  const release = await tab.frame('agent.release');
+  assert.equal(release.token, prepare.requestId);
+  assert.equal((await tab.reply(release.requestId, { ok: true })).status, 204);
+  const out = await run;
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.result.same, true);
+  assert.equal(out.saved.length, 0);
+  assert.deepEqual(tab.seen.filter(x => x === 'agent.prepare' || x === 'agent.release'),
+    ['agent.prepare', 'agent.release']);
+  await unchanged(root, 'a.hwp', bytes, before);
+});
+
+test('wp2: 서로 다른 id와 첫 실패 뒤 재open은 거절하고 파일을 바꾸지 않는다', async t => {
+  const bytes = await blankHwp();
+  const { root, socketPath } = await seed(t, { bytes });
+  const before = await head(root);
+  const other = await runCode(socketPath, "const a=await hwp.open('a.hwp'); await hwp.open('other.hwp'); return a");
+  assert.equal(other.ok, false);
+  assert.match(other.error, /one document per invocation/);
+  const firstFailed = await runCode(socketPath, "try { await hwp.open('absent.hwp'); } catch {} try { await hwp.open('a.hwp'); } catch(e) { console.log('second:',e.message); }");
+  assert.equal(firstFailed.ok, false);
+  assert.match(firstFailed.error, /NOT_FOUND/);
+  assert.ok(firstFailed.logs.some(line => line.includes('second: one document per invocation')));
+  await unchanged(root, 'a.hwp', bytes, before);
+});
+
+test('wp2: Promise.all 재open은 직렬화되어 같은 핸들을 반환한다', async t => {
+  const bytes = await blankHwp();
+  const { socketPath } = await seed(t, { bytes });
+  const out = await runCode(socketPath, "const [a,b]=await Promise.all([hwp.open('a.hwp'),hwp.open('a.hwp')]); return a===b");
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.result, true);
+  assert.deepEqual(out.saved, []);
+});
+
+test('wp2: save 뒤 재open은 같은 핸들이고 mutation after save는 살아 있다', async t => {
+  const bytes = await blankHwp();
+  const { root, socketPath } = await seed(t, { bytes });
+  const before = await head(root);
+  const out = await runCode(socketPath, "const a=await hwp.open('a.hwp'); await hwp.save(a); const b=await hwp.open('a.hwp'); if(a!==b) throw Error('HANDLE_CHANGED'); await hwp.insertText(b,{paragraph:0,text:'blocked'});");
+  assert.equal(out.ok, false);
+  assert.match(out.error, /mutation after save/);
+  assert.deepEqual(out.saved, []);
+  await unchanged(root, 'a.hwp', bytes, before);
+});
+
+test('wp2: prepare 실패 뒤 같은 id 재open도 거절하고 prepare는 한 번뿐이다', async t => {
+  const bytes = await blankHwp();
+  const { root, base, socketPath } = await seed(t, { bytes });
+  const lease = await claimLease(base);
+  const tab = await connectTab(t, base, lease);
+  const before = await head(root);
+  const run = runCode(socketPath, "try { await hwp.open('a.hwp'); } catch (e) { console.log('first:', e.message); } try { await hwp.open('a.hwp'); } catch (e) { console.log('second:', e.message); }");
+  const prepare = await tab.frame('agent.prepare');
+  await tab.reply(prepare.requestId, { ok: false, error: { code: 'PREPARE_REFUSED', message: 'PREPARE_REFUSED' } });
+  const release = await tab.frame('agent.release');
+  assert.equal(release.token, prepare.requestId); // runner는 실패한 prepare의 requestId로 finally에서 release한다(runner.mjs:120,279)
+  await tab.reply(release.requestId, { ok: true });
+  const out = await run;
+  assert.equal(out.ok, false);
+  assert.ok(out.logs.some(line => line.includes('second: one document per invocation')), JSON.stringify(out.logs));
+  assert.equal(tab.seen.filter(x => x === 'agent.prepare').length, 1);
+  await unchanged(root, 'a.hwp', bytes, before);
 });
 
 test('tabs: 여는 중·살아 있음·없음을 구분한다', () => {
