@@ -45,6 +45,8 @@ npm start
 | `LIDGE_HWP_RHWP` | 이 저장소의 `rhwp/` |
 | `LIDGE_HWP_CARGO_TARGET` | 빌드에서 사용할 Cargo target 경로 |
 | `LIDGE_HWP_NODE_BIN` | Node가 든 디렉터리, 생략하면 PATH 사용 |
+| `LIDGE_HWP_EXPORTS` | 사용자 홈의 `.lidge-hwp/exports`, `hwp.snapshot`·`hwp.exportPdf` 결과 위치(문서함 밖이어야 함) |
+| `LIDGE_HWP_RHWP_BIN` | 이 저장소의 `bin/rhwp`, PDF 렌더에 쓸 rhwp CLI |
 
 서버를 인터넷에 노출하거나 다른 사용자와 공유하는 서비스로 운영하지 않는다.
 저장한 문서가 Git 기록에 남으므로 문서함을 공개 저장소로 push하지 않는다.
@@ -91,6 +93,23 @@ return { edited: true };
 열린 문서에는 편집기에서도 같은 변경을 재생한다. 다른 문서로 전환할 때 미저장 편집이
 있으면 자동 전환을 거절한다. 저장 바이트가 기대한 내용과 다르면
 `AGENT_VERIFY_MISMATCH`로 거절한다. `kordoc` 보조 저장은 표 칸 쓰기만 지원한다.
+
+### 쪽 스냅샷과 PDF
+
+편집 결과를 눈으로 확인할 때 브라우저 화면을 찍을 필요가 없다. 번들 rhwp CLI가 문서를 바로 PDF로 그린다.
+
+```js
+const h = await hwp.open('demo/example.hwpx');
+const s = await hwp.snapshot(h);          // 모든 쪽: 쪽마다 PDF + PNG
+const p = await hwp.exportPdf(h);         // 문서 전체 PDF 한 파일
+return { dir: s.dir, pages: s.pages.length, pdf: p.path };
+```
+
+`snapshot(h, { pages, png, pdf, maxPx })`에서 `pages`는 0부터 센 쪽 번호 배열이다(생략하면 전체, 한 번에 200쪽까지).
+PNG는 macOS `sips`로 만들고 긴 변 `maxPx`(기본 1600)에 맞춘다. 결과는
+`~/.lidge-hwp/exports/<문서 ID>/<시각>-<해시>/`에 `page-001.pdf`, `page-001.png`, `document.pdf`로 남고,
+응답에는 경로만 담긴다. 같은 호출에서 저장 전에 고친 내용도 그대로 그린다(`origin: 'edited'`).
+쪽마다 0.3초 정도 걸리므로 긴 문서는 `timeoutMs`를 늘린다. 쪽 나눔은 CLI 조판을 따르므로 편집기와 조금 다를 수 있다.
 
 ### Aside
 

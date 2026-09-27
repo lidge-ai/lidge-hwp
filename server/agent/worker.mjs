@@ -1,6 +1,6 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import vm from 'node:vm';
-const names = ['docs','open','help','selectAll','info','text','paragraphs','tables','cells','find','getFormat','styles','api',
+const names = ['docs','open','help','selectAll','info','text','paragraphs','tables','cells','find','getFormat','styles','snapshot','exportPdf','api',
   'setCell','insertTextInCell','replaceText','setCheckbox','insertText','format','paraFormat','applyStyle',
   'insertParagraph','deleteParagraph','splitParagraph','mergeParagraph','deleteText','deleteRange','replaceAll',
   'createTable','insertRow','insertColumn','deleteRow','deleteColumn','mergeCells','splitCell','save'];
