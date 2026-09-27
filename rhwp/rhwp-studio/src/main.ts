@@ -935,6 +935,13 @@ function setupGlobalShortcuts(): void {
       if (commandId === 'edit:undo' || commandId === 'edit:redo') {
         const result = dispatcher.dispatchWithResult(commandId);
         if (result.ok || result.reason === 'threw') e.preventDefault();
+      } else if (commandId === 'edit:select-all') {
+        // ⌘A — 툴바 버튼 등 textarea 밖 포커스에서도 편집기의 전체 선택을 실행한다.
+        // textarea/input target 은 위에서 이미 return됐으므로 이중 실행되지 않고,
+        // 모달이 떠 있으면 Dialog 의 capture 핸들러가 전파를 먼저 끊는다.
+        e.preventDefault();
+        dispatcher.dispatchWithResult(commandId);
+        inputHandler.focus();
       }
       return;
     }

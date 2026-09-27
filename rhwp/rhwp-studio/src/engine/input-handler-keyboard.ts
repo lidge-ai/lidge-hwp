@@ -1739,6 +1739,21 @@ export function handleSelectAll(this: any): void {
     return;
   }
 
+  // 한컴 정합: 셀 블록(F5) 상태의 ⌘A 는 블록을 풀고 캐럿이 있는 셀 내용만 선택한다.
+  // 키 경로는 셀 선택 분기의 fallthrough 가 블록을 먼저 해제하지만, 메뉴 등 다른
+  // 경로로 들어와도 여기서 블록을 풀어 셀 선택이 되도록 방어적으로 처리한다.
+  if (this.cursor.isInCellSelectionMode()) {
+    this.cursor.exitCellSelectionMode();
+    this.cellSelectionRenderer?.clear();
+  }
+  // 셀·글상자 안의 ⌘A 는 그 컨테이너 내용만 선택한다 (본문 전체가 아니다).
+  if (this.cursor.isInCell()) {
+    if (this.cursor.selectAllInCell()) {
+      this.updateCaret();
+      return;
+    }
+  }
+
   // anchor를 문서 시작, focus를 문서 끝으로 설정
   this.cursor.moveTo({ sectionIndex: 0, paragraphIndex: 0, charOffset: 0 });
   this.cursor.setAnchor();

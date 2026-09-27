@@ -831,6 +831,8 @@ export class InputHandler {
   private clearTableResizeRuntimeCache(): void {
     this.cachedTableRef = null;
     this.cachedCellBboxes = null;
+    // 본문 표 앵커(선택 하이라이트용)도 문서 순서가 바뀌면 무효다.
+    this.bodyTableAnchorCache = null;
     // [#4117] hover 채움 실패 메모도 함께 비운다 — 문서가 바뀌면 실패했던
     // (표, 페이지) 조회가 성공할 수 있다.
     this.tableBboxFetchFailures.clear();
@@ -4120,6 +4122,9 @@ export class InputHandler {
           start.paragraphIndex, start.charOffset,
           end.paragraphIndex, end.charOffset,
         );
+        // getSelectionRects 는 텍스트 run만 뒤집어 선택 범위 안의 표가 통째로 빠진다.
+        // 한컴은 범위에 든 표를 뒤집으므로 표 bbox의 페이지별 합집합을 얹는다.
+        rects = rects.concat(this.bodyTableRectsInRange(start, end));
       } else {
         // 셀↔본문 또는 셀↔다른 셀 혼합 선택: 렌더링 생략
         this.selectionRenderer.clear();
@@ -4129,6 +4134,82 @@ export class InputHandler {
     } catch (e) {
       console.warn('[InputHandler] getSelectionRects 실패:', e);
       this.selectionRenderer.clear();
+    }
+  }
+
+  /**
+   * 본문 최외곽 표의 {구역, 문단, 컨트롤, 앵커 문자 오프셋} 캐시.
+   * getControls() 는 문서 전체를 순회·직렬화하므로 매번 부르지 않고 문서 변경
+   * (afterEdit 계열 → clearTableResizeRuntimeCache) 때 비운다.
+   * getControls() 의 para 는 모든 document.sections[*].paragraphs 를 가로지르는
+   * 평탄 번호다 — 구역 변환은 SectionDef 표식이 아니라 getSectionCount()/
+   * getParagraphCount() 로 세운 시작 경계로 한다.
+   */
+  private bodyTableAnchorCache: { sec: number; para: number; ci: number; off: number }[] | null = null;
+
+  private bodyTableAnchors(): { sec: number; para: number; ci: number; off: number }[] {
+    if (this.bodyTableAnchorCache) return this.bodyTableAnchorCache;
+    const tables: { sec: number; para: number; ci: number; off: number }[] = [];
+    try {
+      const secCount = this.wasm.getSectionCount();
+      const starts = [0];
+      for (let s = 1; s < secCount; s++) {
+        starts.push(starts[s - 1] + this.wasm.getParagraphCount(s - 1));
+      }
+      for (const c of this.wasm.getControls()) {
+        if (c.ctrlId !== 'tbl' || c.list !== 0) continue;
+        let sec = 0;
+        for (let s = starts.length - 1; s >= 0; s--) {
+          if (c.para >= starts[s]) { sec = s; break; }
+        }
+        const para = c.para - starts[sec];
+        const off = this.wasm.getControlTextPositions(sec, para)[c.controlIndex];
+        if (off !== undefined) tables.push({ sec, para, ci: c.controlIndex, off });
+      }
+    } catch { /* 캐시 없이 빈 목록 */ }
+    this.bodyTableAnchorCache = tables;
+    return tables;
+  }
+
+  /**
+   * 본문 선택 범위 [start, end)에 앵커 문자가 든 최외곽 표의 페이지별 합집합 rect.
+   * 텍스트 선택 하이라이트(getSelectionRects)가 표를 건너뛰는 빈 곳을 메운다.
+   * 셀 안 표(list !== 0)는 겉 표 rect에 이미 포함되므로 제외한다.
+   */
+  private bodyTableRectsInRange(
+    start: DocumentPosition,
+    end: DocumentPosition,
+  ): { pageIndex: number; x: number; y: number; width: number; height: number }[] {
+    const tables = this.bodyTableAnchors();
+    if (!tables.length) return [];
+    try {
+      const inRange = (t: { sec: number; para: number; off: number }): boolean => (
+        (t.sec > start.sectionIndex
+          || (t.sec === start.sectionIndex && (t.para > start.paragraphIndex
+            || (t.para === start.paragraphIndex && t.off >= start.charOffset))))
+        && (t.sec < end.sectionIndex
+          || (t.sec === end.sectionIndex && (t.para < end.paragraphIndex
+            || (t.para === end.paragraphIndex && t.off < end.charOffset))))
+      );
+      const rects: { pageIndex: number; x: number; y: number; width: number; height: number }[] = [];
+      for (const t of tables) {
+        if (!inRange(t)) continue;
+        // 표마다 따로 합친다 — 한 쪽의 여러 표를 한 rect로 합치면 사이 여백까지 뒤집힌다.
+        const byPage = new Map<number, { x0: number; y0: number; x1: number; y1: number }>();
+        for (const b of this.wasm.getTableCellBboxes(t.sec, t.para, t.ci)) {
+          const u = byPage.get(b.pageIndex)
+            ?? { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+          u.x0 = Math.min(u.x0, b.x); u.y0 = Math.min(u.y0, b.y);
+          u.x1 = Math.max(u.x1, b.x + b.w); u.y1 = Math.max(u.y1, b.y + b.h);
+          byPage.set(b.pageIndex, u);
+        }
+        for (const [pageIndex, u] of byPage) {
+          rects.push({ pageIndex, x: u.x0, y: u.y0, width: u.x1 - u.x0, height: u.y1 - u.y0 });
+        }
+      }
+      return rects;
+    } catch {
+      return [];
     }
   }
 
