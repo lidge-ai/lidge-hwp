@@ -159,8 +159,8 @@ vendored 엔진의 전체 회귀 테스트에 필요한 일부 원본 문서도 
 GitHub Actions CI는 push와 PR에서 자동으로 돌지 않는다. 필요할 때 브랜치를 지정해 직접 실행한다.
 
 ```sh
-gh workflow run ci.yml --ref <branch>
-gh run watch "$(gh run list --workflow ci.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
+run_url=$(gh workflow run ci.yml --ref <branch>)   # 방금 만든 실행의 URL을 출력한다
+gh run watch "${run_url##*/}" --exit-status
 ```
 
 CI는 WASM·Studio를 한 번 빌드해 `build/`를 넘기고, 테스트를 세 샤드로 나눠 macOS arm64에서 돌린다.
