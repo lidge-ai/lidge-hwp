@@ -16,6 +16,8 @@ npm test
 일부 통합 테스트는 외부 문서 경로 환경변수가 없으면 건너뛴다. 실행 수와 skip 수를
 구분해 보고한다. 개인정보가 든 fixture를 저장소에 추가하면 안 된다.
 검증에는 별도 임시 문서함을 사용하고 작업 중인 문서를 대상으로 실행하지 않는다.
+MCP 재열기와 탭 연동은 `node --test test/live-tab.test.mjs`로 확인한다. 빌드된 WASM으로 빈 문서를
+테스트 안에서 만들므로 개인 문서 fixture가 필요 없다.
 
 CI는 push·PR에서 자동으로 돌지 않는 수동 실행 전용이다. 병합 전 검증이 필요하면
 `gh workflow run ci.yml --ref <branch>`로 실행하고 결과 링크를 PR에 붙인다.
