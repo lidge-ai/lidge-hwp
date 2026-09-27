@@ -10,6 +10,8 @@ use crate::model::event::DocumentEvent;
 use crate::renderer::composer::{reflow_line_segs, ParagraphBox};
 use crate::renderer::page_layout::PageLayoutInfo;
 use crate::renderer::style_resolver::ResolvedStyleSet;
+use crate::model::control::Control;
+use crate::model::paragraph::LineSeg;
 
 pub(super) fn char_shape_mods_affect_text_flow(mods: &crate::model::style::CharShapeMods) -> bool {
     mods.base_size.is_some()
@@ -1033,6 +1035,8 @@ impl DocumentCore {
             let bf_id = self.create_border_fill_from_json(props_json);
             mods.border_fill_id = Some(bf_id);
         }
+        let stored_end = crate::renderer::composer::paragraph_flow_end(
+            &self.document.sections[sec_idx].paragraphs[para_idx]);
         self.apply_char_mods_to_paragraph(sec_idx, para_idx, start_offset, end_offset, &mods)?;
 
         // 텍스트 폭/높이에 영향을 주는 글자 모양 변경 시 LineSeg 재계산.
@@ -1052,16 +1056,17 @@ impl DocumentCore {
             let para_style = styles.para_styles.get(para_shape_id as usize);
             // 본문: 열 상자.
             let paragraph_box = ParagraphBox::body_for_style(col_width, para_style, self.dpi);
-            // 원본 LineSeg 무효화 → reflow가 max_font_size에서 새로 계산
-            self.document.sections[sec_idx].paragraphs[para_idx]
-                .line_segs
-                .clear();
+            // reflow replaces rows while retaining the saved first-row origin.
             reflow_line_segs(
                 &mut self.document.sections[sec_idx].paragraphs[para_idx],
                 paragraph_box,
                 &styles,
                 self.dpi,
             );
+            let hwp3 = self.document.layout_profile().hwp3_layout();
+            crate::renderer::composer::recalculate_section_vpos(
+                &mut self.document.sections[sec_idx].paragraphs, para_idx, None,
+                stored_end, &styles, self.dpi, hwp3);
         }
 
         self.document.sections[sec_idx].raw_stream = None;
@@ -1105,6 +1110,8 @@ impl DocumentCore {
             )));
         }
 
+        let stored_end = crate::renderer::composer::paragraph_flow_end(
+            &self.document.sections[sec_idx].paragraphs[para_idx]);
         let styles = self.resolve_render_styles();
         let available_box = {
             let section = &self.document.sections[sec_idx];
@@ -1127,6 +1134,10 @@ impl DocumentCore {
             para.apply_char_shape_range(start_offset, end_offset, char_shape_id);
             reflow_line_segs(para, available_box, &styles, self.dpi);
         }
+        let hwp3 = self.document.layout_profile().hwp3_layout();
+        crate::renderer::composer::recalculate_section_vpos(
+            &mut self.document.sections[sec_idx].paragraphs, para_idx, None,
+            stored_end, &styles, self.dpi, hwp3);
 
         self.document.sections[sec_idx].raw_stream = None;
         self.rebuild_section(sec_idx);
@@ -1976,6 +1987,55 @@ impl DocumentCore {
         }
     }
 
+    /// Regenerate a body paragraph and reconnect a stale stored forward gap.
+    pub fn reflow_paragraph_flow_native(&mut self, sec: usize, para: usize) -> Result<String, HwpError> {
+        let section = self.document.sections.get(sec).ok_or_else(|| HwpError::RenderError(format!("section {sec} out of bounds")))?;
+        if para == 0 || para >= section.paragraphs.len() {
+            return Err(HwpError::RenderError(format!("paragraph {para} must be in 1..{}", section.paragraphs.len())));
+        }
+        let target = &section.paragraphs[para];
+        if target.controls.iter().any(|c| matches!(c, Control::Table(_) | Control::Picture(_) | Control::Shape(_) | Control::Equation(_))) {
+            return Err(HwpError::RenderError("REFLOW_UNSUPPORTED_CONTROL".into()));
+        }
+        let prev_end = section.paragraphs[..para].iter().rev().find_map(crate::renderer::composer::paragraph_flow_end);
+        if let (Some(first), Some(end)) = (target.line_segs.first(), prev_end) {
+            if first.tag & LineSeg::TAG_IMPLEMENTATION_PROPERTY == 0 && first.vertical_pos < end {
+                return Err(HwpError::RenderError("REFLOW_STORED_BREAK: stored page/column break".into()));
+            }
+        }
+        let stored_end = crate::renderer::composer::paragraph_flow_end(target);
+        self.reflow_paragraph(sec, para);
+        let styles = self.resolve_render_styles();
+        let hwp3 = self.document.layout_profile().hwp3_layout();
+        crate::renderer::composer::recalculate_section_vpos(
+            &mut self.document.sections[sec].paragraphs, para, None, stored_end, &styles, self.dpi, hwp3);
+        self.document.sections[sec].raw_stream = None;
+        self.rebuild_section(sec);
+        Ok("{\"ok\":true}".to_string())
+    }
+
+    /// Return only stored paragraph boundaries whose gap differs from their style gap.
+    pub fn stored_flow_gaps_native(&self, sec: usize) -> Result<String, HwpError> {
+        let section = self.document.sections.get(sec).ok_or_else(|| HwpError::RenderError(format!("section {sec} out of bounds")))?;
+        let styles = self.resolve_render_styles();
+        let hwp3 = self.document.layout_profile().hwp3_layout();
+        let mut gaps = Vec::new();
+        for para in 1..section.paragraphs.len() {
+            let prev = &section.paragraphs[para - 1];
+            let curr = &section.paragraphs[para];
+            let (Some(end), Some(first)) = (crate::renderer::composer::paragraph_flow_end(prev), curr.line_segs.first()) else { continue };
+            let gap = first.vertical_pos.saturating_sub(end);
+            let style_gap = crate::renderer::composer::boundary_gap(prev, curr, &styles, self.dpi, hwp3);
+            let synthetic = first.tag & LineSeg::TAG_IMPLEMENTATION_PROPERTY != 0;
+            let stored_reset = !synthetic && gap < 0;
+            if gap != style_gap || stored_reset {
+                gaps.push(serde_json::json!({"paragraph":para,"gap":gap,"styleGap":style_gap,
+                    "synthetic":synthetic,"storedReset":stored_reset}));
+            }
+        }
+        Ok(serde_json::to_string(&gaps).unwrap_or_else(|_| "[]".into()))
+    }
+
     /// 구역의 본문 문단 전부를 현재 용지/단 기준으로 다시 접는다 — 쪽 설정이 바뀌어 본문
     /// 폭 자체가 달라졌을 때 쓴다.
     ///
@@ -2417,6 +2477,56 @@ mod tests {
     use crate::model::paragraph::{CharShapeRef, Paragraph};
     use crate::model::style::{CharShapeMods, ParaShapeMods};
     use crate::model::table::{Cell, Table};
+
+    #[test]
+    fn reflow_paragraph_flow_reconnects_stale_forward_gap() {
+        let mut core = DocumentCore::from_bytes(include_bytes!("../../../saved/blank2010.hwp")).unwrap();
+        for index in 1..5 { core.insert_paragraph_native(0, index).unwrap(); }
+        for index in 0..5 { core.insert_text_native(0, index, 0, "A").unwrap(); }
+        for seg in &mut core.document.sections[0].paragraphs[3].line_segs {
+            seg.vertical_pos += 60_000;
+            seg.tag &= !crate::model::paragraph::LineSeg::TAG_IMPLEMENTATION_PROPERTY;
+        }
+        core.document.sections[0].raw_stream = None;
+        let stale = core.export_hwp_native().unwrap();
+        assert_eq!(DocumentCore::from_bytes(&stale).unwrap().page_count(), 2);
+        core.reflow_paragraph_flow_native(0, 3).unwrap();
+        let repaired = core.export_hwp_native().unwrap();
+        assert_eq!(DocumentCore::from_bytes(&repaired).unwrap().page_count(), 1);
+        let gaps = core.stored_flow_gaps_native(0).unwrap();
+        assert!(!gaps.contains("60000"), "{gaps}");
+    }
+
+    #[test]
+    fn reflow_paragraph_flow_refuses_stored_break() {
+        let mut core = DocumentCore::from_bytes(include_bytes!("../../../samples/hwp3-sample16-hwp5.hwp")).unwrap();
+        let before = core.export_hwp_native().unwrap();
+        assert_eq!(core.page_count(), 64);
+        let error = core.reflow_paragraph_flow_native(0, 25).unwrap_err();
+        assert!(error.to_string().contains("REFLOW_STORED_BREAK"), "{error}");
+        assert_eq!(core.page_count(), 64);
+        assert_eq!(core.export_hwp_native().unwrap(), before);
+    }
+
+    #[test]
+    fn char_size_after_empty_paragraph_keeps_flow_origin() {
+        let mut core = DocumentCore::from_bytes(include_bytes!("../../../saved/blank2010.hwp")).unwrap();
+        core.insert_text_native(0, 0, 0, "Title").unwrap();
+        core.apply_char_format_native(0, 0, 0, 5, r#"{"fontSize":2000}"#).unwrap();
+        for (index, text) in ["A", "B", "", "C", "D"].iter().enumerate() {
+            core.insert_paragraph_native(0, index + 1).unwrap();
+            if !text.is_empty() { core.insert_text_native(0, index + 1, 0, text).unwrap(); }
+        }
+        for para in [2, 4] {
+            core.apply_char_format_native(0, para, 0, 1, r#"{"fontSize":1300}"#).unwrap();
+            assert_eq!(core.page_count(), 1);
+        }
+        let empty_end = crate::renderer::composer::paragraph_flow_end(&core.document.sections[0].paragraphs[3]).unwrap();
+        let c_start = core.document.sections[0].paragraphs[4].line_segs[0].vertical_pos;
+        assert!(c_start >= empty_end, "C origin {c_start} precedes empty flow end {empty_end}");
+        let bytes = core.export_hwp_native().unwrap();
+        assert_eq!(DocumentCore::from_bytes(&bytes).unwrap().page_count(), 1);
+    }
 
     #[test]
     fn char_ratio_and_spacing_changes_require_text_reflow() {

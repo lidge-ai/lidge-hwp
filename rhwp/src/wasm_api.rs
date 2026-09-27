@@ -2572,6 +2572,16 @@ impl HwpDocument {
             .map_err(|e| e.into())
     }
 
+    #[wasm_bindgen(js_name = reflowParagraph)]
+    pub fn reflow_paragraph_flow(&mut self, section_idx: u32, para_idx: u32) -> Result<String, JsValue> {
+        self.reflow_paragraph_flow_native(section_idx as usize, para_idx as usize).map_err(|e| e.into())
+    }
+
+    #[wasm_bindgen(js_name = getStoredFlowGaps)]
+    pub fn get_stored_flow_gaps(&self, section_idx: u32) -> Result<String, JsValue> {
+        self.stored_flow_gaps_native(section_idx as usize).map_err(|e| e.into())
+    }
+
     // ─── Phase 1: 기본 편집 보조 API ───────────────────────────
 
     /// 구역(Section) 수를 반환한다.

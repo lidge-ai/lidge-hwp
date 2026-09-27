@@ -11,7 +11,8 @@ import { selectAll } from '../../lib/scope.mjs';
 import { STRUCTURE } from '../../lib/structure.mjs';
 import { insertTextHelper, setCellHelper } from '../../lib/text-helpers.mjs';
 import { wireError } from './wire-error.mjs';
-import { renderDocument } from '../../lib/render.mjs';
+import { renderDocument, cliPageCountOf } from '../../lib/render.mjs';
+import { createPageView } from '../../lib/page-view.mjs';
 import { EXPORTS_ROOT, RHWP_BIN } from '../../lib/config.mjs';
 const MUTATE_HELPERS = { format, paraFormat, applyStyle, ...STRUCTURE };
 import { contentSignature } from '../../lib/signature.mjs';
@@ -26,6 +27,8 @@ export async function runAgent({ code, timeoutMs = 30000 },
     { store, tabs, config }) {
   const start = Date.now();
   const exporter = config.exporter ?? exportWithReport;
+  const openDoc = config.openDocument ?? openDocument;
+  const rhwpBin = config.rhwpBin ?? RHWP_BIN;
   const historyFor = store.historyFor ? id => store.historyFor(id)
     : async id => ({ workTree: store.root, gitDir: null, path: id });
   const exportRoots = store.exportRoots ? () => store.exportRoots() : () => [store.root];
@@ -136,7 +139,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
           source = { bytes: prepared.contentLoss.count > 0 ? disk.bytes : prepared.bytes,
             sha256: disk.sha256, format: disk.format };
         } else source = disk;
-        doc = await openDocument(source.bytes);
+        doc = await openDoc(source.bytes);
       } catch (error) {
         // open 실패. prepare가 탭에 닿았으면(prepareToken 있음) 문서 잠금을 여기서 풀지 않는다.
         // finally의 releaseTab()이 끝난 뒤 lockToken.release()가 푼다. 탭에 닿지 않은 실패만 즉시 푼다.
@@ -148,6 +151,9 @@ export async function runAgent({ code, timeoutMs = 30000 },
       state = { id, handle, source, doc, lease, prepared, batch: newBatch({ diskSha256: source.sha256,
         documentEpoch: prepared?.state.documentEpoch ?? null, changeSeq: prepared?.state.changeSeq ?? null,
         exportSha256: prepared?.exportSha256 ?? null }), save: false };
+      state.pages = createPageView({ source, getGen: () => state.batch.ops.length, getDoc: () => state.doc,
+        format: source.format, exporter, openDocument: openDoc, cliPageCount: config.cliPageCount ?? cliPageCountOf,
+        rhwpBin, deadline });
       return handle;
     }
     if (!state || args[0] !== state.handle) throw new Error('invalid handle');
@@ -160,17 +166,16 @@ export async function runAgent({ code, timeoutMs = 30000 },
     if (name === 'styles') return styles(state.doc);
     if (name === 'snapshot' || name === 'exportPdf') {
       // 읽기 전용 렌더. 이번 호출에서 편집했으면 편집 결과를, 아니면 연 바이트(탭이 있으면 탭의 현재 내용)를 그린다.
-      let bytes = state.source.bytes, origin = state.prepared && state.prepared.contentLoss.count === 0 ? 'tab' : 'disk';
-      if (state.batch.ops.length) {
-        const exported = exporter(state.doc, state.source.format);
-        if (exported.report.count > 0) throw new Error('RENDER_CONTENT_LOSS: edited document cannot be exported without loss; save first');
-        bytes = exported.bytes; origin = 'edited';
-      }
+      const { bytes, cliPageCount } = await state.pages.current();
+      const origin = state.batch.ops.length ? 'edited' : state.prepared && state.prepared.contentLoss.count === 0 ? 'tab' : 'disk';
       const out = await renderDocument({ kind: name === 'snapshot' ? 'snapshot' : 'pdf', bytes, format: state.source.format,
         docId: exportPath(state.id), options: args[1], exportsRoot: config.exportsRoot ?? EXPORTS_ROOT,
         docsRoots: exportRoots(),
-        rhwpBin: config.rhwpBin ?? RHWP_BIN, deadline });
-      return { docId: state.id, origin, ...out };
+        rhwpBin, deadline });
+      if (out.pageCount !== cliPageCount) console.warn('[page-view] CLI dump-pages/render mismatch',
+        { docId: state.id, api: cliPageCount, snapshot: out.pageCount });
+      return { docId: state.id, origin, ...out,
+        ...(out.pageCount !== cliPageCount ? { pageCountMismatch: { api: cliPageCount, snapshot: out.pageCount } } : {}) };
     }
     if (name === 'api') {
       const method = args[1], rest = args.slice(2);
@@ -179,6 +184,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
         if (state.save) throw new Error('mutation after save');
         return applyCall(state.doc, state.batch, method, rest);
       }
+      if (['pageCount', 'getPageText', 'getDocumentInfo'].includes(method)) return state.pages.read(method, rest);
       return readApi(state.doc, method, rest); // 목록에 없으면 여기서 API_METHOD_DENIED
     }
     if (name === 'setCell' || name === 'insertText') {
@@ -190,6 +196,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
       if (state.save) throw new Error('mutation after save');
       return applyOp(state.doc, state.batch, name, args[1]);
     }
+    if (name === 'info' || name === 'text') return state.pages.read(name, [args[1]]);
     return readView(state.doc, name, args[1]);
   };
   try {
@@ -246,7 +253,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
           // 그래서 기대값은 Node 문서의 내용 서명이다. 탭에는 보내지 않고 서버 PUT만 읽는다(api-docs → verifyAgentBytes).
           // 기대값은 Node가 저장할 바이트(reported.bytes)를 다시 연 문서로 잰다. 저장 때 rhwp가 채우는 값(새 표의 바깥 여백 등)을
           // 탭 바이트(verifyAgentBytes도 다시 열어서 잰다)와 같은 조건에서 비교하려는 것이다(030).
-          const reopened = await openDocument(reported.bytes);
+          const reopened = await openDoc(reported.bytes);
           let signature;
           try { signature = contentSignature(reopened); } finally { reopened.free(); }
           if (signature.status !== 'ok') throw new Error(`SIGNATURE_UNSUPPORTED: ${signature.reasons.slice(0, 3).join('; ')}`);
@@ -297,6 +304,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
     // prepare가 성공했든 실패했든(requestId가 있으면) 탭 해제가 끝난 뒤에만 문서 잠금을 푼다.
     // releaseTab()이 waitAgentSave를 먼저 기다린다. 격리된 임대에도 release를 보낸다.
     await releaseTab();
-    state?.doc.free(); lockToken?.release();
+    try { state?.pages?.close(); }
+    finally { state?.doc.free(); lockToken?.release(); }
   }
 }

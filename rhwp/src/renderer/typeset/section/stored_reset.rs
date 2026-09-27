@@ -35,8 +35,8 @@ impl TypesetEngine {
         // vpos-reset trigger 시 wrap_around 강제 종료 + advance_column_or_new_page.
         if para_idx > 0 && !st.current_items.is_empty() {
             let prev_para = &paragraphs[para_idx - 1];
-            let curr_first_vpos = para.line_segs.first().map(|s| s.vertical_pos);
-            let prev_last_vpos = prev_para.line_segs.last().map(|s| s.vertical_pos);
+            let curr_first_vpos = para.line_segs.first().filter(|s| !is_synthetic_line_seg(s)).map(|s| s.vertical_pos);
+            let prev_last_vpos = prev_para.line_segs.last().filter(|s| !is_synthetic_line_seg(s)).map(|s| s.vertical_pos);
             if let (Some(cv), Some(pv)) = (curr_first_vpos, prev_last_vpos) {
                 // 현재 문단의 vpos가 직전 문단의 마지막 vpos보다 작은 경우 — 컬럼/페이지 reset 시그널.
                 // - 단일 단: cv == 0 만 인정 (Task #321 보수적 기준 유지).
@@ -345,5 +345,36 @@ impl TypesetEngine {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod wp15_tests {
+    use crate::document_core::DocumentCore;
+    use super::page_item_para_index;
+    use std::collections::HashSet;
+
+    #[test]
+    fn real_stored_resets_still_start_pages() {
+        let core = DocumentCore::from_bytes(include_bytes!("../../../../samples/hwp3-sample16-hwp5.hwp")).unwrap();
+        assert_eq!(core.page_count(), 64);
+        let mut reset_count = 0;
+        for (section_index, section) in core.document.sections.iter().enumerate() {
+            let paragraphs = &section.paragraphs;
+            let resets: Vec<usize> = (1..paragraphs.len()).filter(|&index| {
+                let prev = paragraphs[index - 1].line_segs.last();
+                let curr = paragraphs[index].line_segs.first();
+                matches!((prev, curr), (Some(p), Some(c)) if p.vertical_pos > 5000 && c.vertical_pos == 0 && !super::is_synthetic_line_seg(c))
+            }).collect();
+            reset_count += resets.len();
+            let starts: HashSet<usize> = core.pagination[section_index].pages.iter().skip(1)
+                .filter_map(|page| page.column_contents.iter().flat_map(|col| &col.items)
+                    .find_map(page_item_para_index)).collect();
+            assert!(resets.iter().all(|index| starts.contains(index)), "section {section_index} missing page starts: {:?}",
+                resets.iter().filter(|index| !starts.contains(index)).collect::<Vec<_>>());
+        }
+        // Directly counted from the checked-in sample: 56 qualifying within-section
+        // resets. Page membership is asserted above as well.
+        assert_eq!(reset_count, 56);
     }
 }

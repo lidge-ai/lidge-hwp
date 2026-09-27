@@ -8,6 +8,11 @@ import { createRootsRegistry } from '../lib/roots.mjs';
 import { createTabs } from '../server/tabs.mjs';
 import { checkSnapshotOptions, stampName, pageFile } from '../lib/render.mjs';
 import { ROOT } from '../lib/config.mjs';
+import { RHWP_BIN } from '../lib/config.mjs';
+import { openDocument } from '../lib/rhwp-node.mjs';
+import { cliPageCountOf } from '../lib/render.mjs';
+import { createHandleTracker, createFailingCli } from './helpers/handle-tracker.mjs';
+import { makeRhwpStub } from './helpers/rhwp-stub.mjs';
 const run = promisify(execFile);
 const SAMPLES = join(ROOT, 'rhwp', 'samples');
 const PDF = Buffer.from('%PDF-'), PNG = Buffer.from('89504e470d0a1a0a', 'hex');
@@ -127,6 +132,85 @@ test('snapshot renders unsaved edits from the same call and writes nothing to th
   assert.notEqual(out.result.sourceSha256, (await run('shasum', ['-a', '256', join(root, 'empty.hwpx')])).stdout.slice(0, 64));
   assert.ok(Buffer.compare(before, await readFile(join(root, 'empty.hwpx'))) === 0);
   await clean(root);
+});
+
+test('T23-a edited HWP page reads follow snapshot bytes and CLI count', async t => {
+  const f = await seed(t, { 'long.hwp': 'hwp3-sample16-hwp5.hwp' });
+  const out = await f.agent("const h=await hwp.open('long.hwp'); await hwp.api(h,'insertParagraph',0,4); await hwp.api(h,'insertParagraph',0,10); const count=await hwp.api(h,'pageCount'); const info=await hwp.info(h); const apiInfo=await hwp.api(h,'getDocumentInfo'); const last=await hwp.api(h,'getPageText',64); const snap=await hwp.snapshot(h,{png:false,pages:[64]}); return {count,info:info.pageCount,apiInfo:apiInfo.pageCount,last,snap:snap.pageCount};");
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.deepEqual([out.result.count, out.result.info, out.result.apiInfo, out.result.snap], [65, 65, 65, 65]);
+  assert.ok(out.result.last.length > 0);
+  await clean(f.root);
+});
+
+test('T23-b edited HWPX page reads follow snapshot', async t => {
+  const f = await seed(t, { 'empty.hwpx': EMPTY });
+  const out = await f.agent("const h=await hwp.open('empty.hwpx'); await hwp.api(h,'insertParagraph',0,0); return {count:await hwp.api(h,'pageCount'),info:(await hwp.info(h)).pageCount,snap:(await hwp.snapshot(h,{png:false,pages:[0]})).pageCount};");
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.deepEqual(out.result, { count: 2, info: 2, snap: 2 });
+  await clean(f.root);
+});
+
+test('T23-c one CLI resolver feeds page count and snapshot; text divergence is explicit', async t => {
+  const f = await seed(t, { 'long.hwp': 'hwp3-sample16-hwp5.hwp' });
+  const stub = await makeRhwpStub(f.exportsRoot, RHWP_BIN);
+  f.context.config.rhwpBin = stub.path;
+  const code = "const h=await hwp.open('long.hwp'); await hwp.api(h,'insertParagraph',0,4); await hwp.api(h,'insertParagraph',0,10); return {count:await hwp.api(h,'pageCount'),info:(await hwp.info(h)).pageCount,snapshot:(await hwp.snapshot(h,{png:false,pages:[0]})).pageCount};";
+  const out = await f.agent(code);
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.deepEqual(out.result, { count: 66, info: 66, snapshot: 66 });
+  const lines = (await readFile(stub.logFile, 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.deepEqual(new Set(lines.map(row => row.cmd)), new Set(['dump-pages', 'export-pdf']));
+  assert.equal(new Set(lines.map(row => row.inputSha256)).size, 1);
+  const divergent = await f.agent("const h=await hwp.open('long.hwp'); await hwp.api(h,'insertParagraph',0,4); await hwp.api(h,'insertParagraph',0,10); return await hwp.api(h,'getPageText',0);");
+  assert.equal(divergent.ok, false);
+  assert.match(divergent.error, /^PAGE_LAYOUT_DIVERGED/);
+  await clean(f.root);
+});
+
+test('T23-h snapshot reports a dump-pages versus render manifest mismatch', async t => {
+  const f = await seed(t, { 'long.hwp': 'hwp3-sample16-hwp5.hwp' });
+  f.context.config.rhwpBin = (await makeRhwpStub(f.exportsRoot, RHWP_BIN, { exportExtra: 0 })).path;
+  const out = await f.agent("const h=await hwp.open('long.hwp'); await hwp.api(h,'insertParagraph',0,4); await hwp.api(h,'insertParagraph',0,10); return await hwp.snapshot(h,{png:false,pages:[0]});");
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.deepEqual(out.result.pageCountMismatch, { api: 66, snapshot: 65 });
+  await clean(f.root);
+});
+
+test('E1 failed page read aborts hwp_exec, frees every handle and a later call succeeds', async t => {
+  const f = await seed(t, { 'long.hwp': 'hwp3-sample16-hwp5.hwp' });
+  const tracker = createHandleTracker(openDocument), cli = createFailingCli(cliPageCountOf, [2]);
+  f.context.config.openDocument = tracker.open; f.context.config.cliPageCount = cli;
+  const before = await readFile(join(f.root, 'long.hwp'));
+  const first = await f.agent("const h=await hwp.open('long.hwp'); await hwp.api(h,'insertParagraph',0,4); await hwp.api(h,'pageCount'); await hwp.api(h,'insertParagraph',0,10); try { await hwp.api(h,'pageCount'); } catch {} await hwp.save(h); return 'x';");
+  assert.equal(first.ok, false, JSON.stringify(first));
+  assert.match(first.error, /^RENDER_FAILED/);
+  assert.deepEqual(await readFile(join(f.root, 'long.hwp')), before);
+  assert.deepEqual(tracker.stats().live, []);
+  assert.equal(tracker.stats().opens, tracker.stats().frees);
+  const second = await f.agent("const h=await hwp.open('long.hwp'); await hwp.api(h,'insertParagraph',0,4); await hwp.api(h,'insertParagraph',0,10); return await hwp.api(h,'pageCount');");
+  assert.equal(second.ok, true, JSON.stringify(second));
+  assert.equal(second.result, 65);
+  assert.deepEqual(tracker.stats().live, []);
+  assert.equal(tracker.stats().opens, tracker.stats().frees);
+  await clean(f.root);
+});
+
+test('E2 unedited page read failure releases the source handle', async t => {
+  const f = await seed(t, { 'long.hwp': 'hwp3-sample16-hwp5.hwp' });
+  const tracker = createHandleTracker(openDocument);
+  f.context.config.openDocument = tracker.open;
+  f.context.config.cliPageCount = createFailingCli(cliPageCountOf, [1]);
+  const first = await f.agent("const h=await hwp.open('long.hwp'); return await hwp.api(h,'pageCount');");
+  assert.equal(first.ok, false);
+  assert.match(first.error, /^RENDER_FAILED/);
+  assert.deepEqual(tracker.stats(), { opens: 1, frees: 1, live: [], errors: [] });
+  f.context.config.cliPageCount = cliPageCountOf;
+  const second = await f.agent("const h=await hwp.open('long.hwp'); return await hwp.api(h,'pageCount');");
+  assert.equal(second.ok, true, JSON.stringify(second));
+  assert.equal(second.result, 64);
+  assert.deepEqual(tracker.stats(), { opens: 2, frees: 2, live: [], errors: [] });
+  await clean(f.root);
 });
 
 test('out-of-range pages fail and leave no output directory', async t => {

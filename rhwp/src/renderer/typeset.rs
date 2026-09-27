@@ -2479,8 +2479,8 @@ fn paragraph_saved_vpos_reset_starts_new_page_after(
         return false;
     }
 
-    let next_first_vpos = next_para.line_segs.first().map(|s| s.vertical_pos);
-    let curr_last_vpos = current_para.line_segs.last().map(|s| s.vertical_pos);
+    let next_first_vpos = next_para.line_segs.first().filter(|s| !is_synthetic_line_seg(s)).map(|s| s.vertical_pos);
+    let curr_last_vpos = current_para.line_segs.last().filter(|s| !is_synthetic_line_seg(s)).map(|s| s.vertical_pos);
     let multi_col = col_count > 1;
     let allowed_top_vpos = if is_hwp3_variant { 1500 } else { 0 };
 
@@ -5608,6 +5608,25 @@ mod tests {
     use crate::renderer::page_layout::PageLayoutInfo;
     use crate::renderer::pagination::Paginator;
     use crate::renderer::style_resolver::ResolvedStyleSet;
+
+    #[test]
+    fn synthetic_zero_vpos_is_not_stored_page_boundary() {
+        let prev = Paragraph { line_segs: vec![LineSeg { vertical_pos: 8_000, line_height: 1_000,
+            tag: LineSeg::TAG_SINGLE_SEGMENT_LINE, ..Default::default() }], ..Default::default() };
+        let next = Paragraph { line_segs: vec![LineSeg { vertical_pos: 0, line_height: 1_000,
+            tag: LineSeg::TAG_SINGLE_SEGMENT_LINE | LineSeg::TAG_IMPLEMENTATION_PROPERTY,
+            ..Default::default() }], ..Default::default() };
+        assert!(!paragraph_saved_vpos_reset_starts_new_page_after(&prev, &next, 1, false));
+    }
+
+    #[test]
+    fn real_zero_vpos_same_ir_still_breaks() {
+        let prev = Paragraph { line_segs: vec![LineSeg { vertical_pos: 8_000, line_height: 1_000,
+            tag: LineSeg::TAG_SINGLE_SEGMENT_LINE, ..Default::default() }], ..Default::default() };
+        let next = Paragraph { line_segs: vec![LineSeg { vertical_pos: 0, line_height: 1_000,
+            tag: LineSeg::TAG_SINGLE_SEGMENT_LINE, ..Default::default() }], ..Default::default() };
+        assert!(paragraph_saved_vpos_reset_starts_new_page_after(&prev, &next, 1, false));
+    }
 
     fn a4_page_def() -> PageDef {
         PageDef {

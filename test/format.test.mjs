@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { join } from 'node:path';
+import { ROOT } from '../lib/config.mjs';
 import { openDocument, exportWithReport } from '../lib/rhwp-node.mjs';
 import { newBatch } from '../lib/ops.mjs';
 import { tableAddresses, nestedCellParagraphs, resolveCell } from '../lib/cells.mjs';
@@ -9,6 +13,34 @@ import { format, paraFormat, getFormat, styles, applyStyle } from '../lib/format
 import { contentSignature } from '../lib/signature.mjs';
 
 const code = c => e => e.code === c;
+test('saved synthetic zero vpos no longer forces a page (#22)', async () => {
+  const bytes = await readFile(join(ROOT, 'test/fixtures/issue22-synthetic-zero.hwp'));
+  const doc = await openDocument(bytes);
+  try { assert.equal(doc.pageCount(), 1); } finally { doc.free(); }
+  const { stdout } = await promisify(execFile)(join(ROOT, 'bin/darwin-arm64/rhwp'),
+    ['dump-pages', join(ROOT, 'test/fixtures/issue22-synthetic-zero.hwp'), '--json']);
+  assert.equal(JSON.parse(stdout).pageCount, 1);
+});
+test('T22-e size after an empty paragraph stays on one page after deleting the empty and saving', async () => {
+  const doc = await openDocument(await readFile(join(ROOT, 'rhwp/saved/blank2010.hwp')));
+  try {
+    doc.insertText(0, 0, 0, 'Title');
+    doc.applyCharFormat(0, 0, 0, 5, JSON.stringify({ fontSize: 2000 }));
+    for (const [index, text] of ['A', 'B', '', 'C', 'D'].entries()) {
+      doc.insertParagraph(0, index + 1);
+      if (text) doc.insertText(0, index + 1, 0, text);
+    }
+    for (const para of [2, 4]) doc.applyCharFormat(0, para, 0, 1,
+      JSON.stringify({ fontSize: 1300, bold: true, textColor: '#224488' }));
+    assert.equal(doc.pageCount(), 1);
+    doc.deleteParagraph(0, 3);
+    assert.equal(doc.pageCount(), 1);
+    assert.deepEqual(JSON.parse(doc.getStoredFlowGaps(0)), []);
+    const bytes = exportWithReport(doc, 'hwp').bytes;
+    const again = await openDocument(bytes);
+    try { assert.equal(again.pageCount(), 1); } finally { again.free(); }
+  } finally { doc.free(); }
+});
 async function fixtureDoc(t) {
   const fixture = process.env.LIDGE_HWP_SIG_FIXTURE;
   if (!fixture) { t.skip('set LIDGE_HWP_SIG_FIXTURE'); return null; }

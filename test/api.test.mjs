@@ -46,6 +46,21 @@ test('Node와 탭 목록·정규화가 같다', () => {
   assert.equal(tsCanonical(v), canonical(v));
   assert.equal(tsNormalize('{"ok":true,"a":1}'), normalizeResult('{"a":1,"ok":true}'));
 });
+test('T22-d reflowParagraph records and replays; getStoredFlowGaps is read-only', async () => {
+  const bytes = await readFile(new URL('../rhwp/saved/blank2010.hwp', import.meta.url));
+  const first = await openDocument(bytes), second = await openDocument(bytes);
+  try {
+    for (const doc of [first, second]) {
+      for (let p = 1; p < 5; p++) doc.insertParagraph(0, p);
+      for (let p = 0; p < 5; p++) doc.insertText(0, p, 0, 'A');
+    }
+    const batch = newBatch({});
+    assert.deepEqual(applyCall(first, batch, 'reflowParagraph', [0, 4]), { ok: true });
+    assert.equal(replayCall(second, batch.ops[0], sha), '{"ok":true}');
+    assert.deepEqual(readApi(first, 'getStoredFlowGaps', [0]), JSON.parse(first.getStoredFlowGaps(0)));
+    assert.throws(() => readApi(first, 'reflowParagraph', [0, 4]), code('API_METHOD_DENIED'));
+  } finally { first.free(); second.free(); }
+});
 test('replayCall(탭 재생): 반환값이 다르면 RESULT_MISMATCH, 목록 밖·함수 없음도 막는다', () => {
   const hash = s => sha(s);
   const op = { args: { method: 'applyCharFormat', args: [0, 0, 0, 1, '{"italic":true}'] }, resultSha256: sha(normalizeResult('{"ok":true}')) };
