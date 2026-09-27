@@ -24,6 +24,14 @@ test('⌘A 는 셀 블록을 풀고 캐럿 셀 내용만 선택한다 — 본문
   assert.ok(cellIdx < docStart, '셀 분기가 본문 전체 선택보다 먼저 와야 한다');
 });
 
+test('⌘A 는 캐럿을 범위 끝으로 옮겨도 화면을 스크롤하지 않는다 (맨 아래로 튀는 결함)', () => {
+  const fn = keyboardSrc.slice(keyboardSrc.indexOf('export function handleSelectAll'));
+  const body = fn.slice(0, fn.indexOf('\n}'));
+  const calls = body.match(/this\.updateCaret\([^)]*\)/g) ?? [];
+  assert.equal(calls.length, 3, '머리말·셀·문서 세 경로가 캐럿을 갱신한다');
+  for (const call of calls) assert.equal(call, 'this.updateCaret(true)', `스크롤 생략이어야 한다: ${call}`);
+});
+
 test('selectAllInCell 은 셀 첫 문단~마지막 문단 끝을 선택한다', () => {
   assert.match(cursorSrc, /selectAllInCell\(\):\s*boolean/);
   const fn = cursorSrc.slice(cursorSrc.indexOf('selectAllInCell(): boolean'));

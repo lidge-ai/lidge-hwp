@@ -1761,9 +1761,11 @@ export function handleCtrlKey(this: any, e: KeyboardEvent): void {
 }
 
 export function handleSelectAll(this: any): void {
+  // ⌘A는 선택 범위만 바꾼다. 캐럿이 범위 끝(문서·셀 끝)으로 가더라도 화면을 그쪽으로
+  // 스크롤하지 않는다 — 보던 위치가 문서 맨 아래로 튀는 결함을 막는다.
   if (this.cursor.isInHeaderFooter()) {
     this.cursor.selectAllInHeaderFooter();
-    this.updateCaret();
+    this.updateCaret(true);
     return;
   }
 
@@ -1777,7 +1779,7 @@ export function handleSelectAll(this: any): void {
   // 셀·글상자 안의 ⌘A 는 그 컨테이너 내용만 선택한다 (본문 전체가 아니다).
   if (this.cursor.isInCell()) {
     if (this.cursor.selectAllInCell()) {
-      this.updateCaret();
+      this.updateCaret(true);
       return;
     }
   }
@@ -1788,7 +1790,7 @@ export function handleSelectAll(this: any): void {
   this.cursor.moveTo({ sectionIndex: 0, paragraphIndex: 0, charOffset: 0 });
   this.cursor.setAnchor();
   this.cursor.moveToDocumentEnd();
-  this.updateCaret();
+  this.updateCaret(true);
 }
 
 function copyHeaderFooterSelection(this: any, e: ClipboardEvent): boolean {
