@@ -185,14 +185,18 @@ export class EditorTransport {
     if (message?.type === 'rhwp-event') {
       const keys = Object.keys(message).sort();
       const expectedKeys = ['event', 'payload', 'sessionId', 'type', 'version'];
+      const hostEvents = new Set(['lidge.hostSaveRequested', 'lidge.hostRenameRequested',
+        'lidge.hostCopyPathRequested', 'lidge.hostNewRequested']);
       if (message.version !== PROTOCOL_VERSION
           || message.sessionId !== this._sessionId
-          || !(message.event === 'lidge.hostSaveRequested'
+          || !(hostEvents.has(message.event)
             ? this._peerCapabilities.has('lidge-host-v1')
-            : this._peerCapabilities.has('document-change-events-v1'))
+            : message.event === 'documentChanged' && this._peerCapabilities.has('document-change-events-v1'))
           || keys.length !== expectedKeys.length
           || keys.some((key, index) => key !== expectedKeys[index])
-          || typeof message.event !== 'string') return;
+          || typeof message.event !== 'string'
+          || (hostEvents.has(message.event) && (message.payload?.schemaVersion !== 1
+            || Object.keys(message.payload).length !== 1))) return;
       for (const listener of this._listeners.get(message.event) || []) {
         try { listener(message.payload); } catch { /* 한 listener가 다른 listener를 막지 않는다. */ }
       }

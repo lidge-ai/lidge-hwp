@@ -3,6 +3,7 @@ import { startAgentChannel } from '/agent-channel.mjs';
 import { followSwitch } from '/follow-switch.mjs';
 import { copyPath, isCopyPathShortcut } from '/copy-path.mjs';
 import { isNewDocShortcut } from '/new-doc.mjs';
+import { dispatchHostEvent } from '/host-shortcuts.mjs';
 import { initSidebar } from '/sidebar.mjs';
 import { groupDocs, groupKeyOf, createGroupFor, matchDoc, renderProjects, readCollapsedGroups, writeCollapsedGroups, bindListKeys, displayName } from '/projects.mjs';
 
@@ -326,6 +327,10 @@ async function newDocument(name) {
   } finally { creating = false; }
 }
 
+function requestNewDocument() {
+  if (!creating) void newDocument();
+}
+
 function rowFor(id) {
   return (list.querySelector(`.doc[data-id="${CSS.escape(id)}"]`)
     || externalList.querySelector(`.doc[data-id="${CSS.escape(id)}"]`))?.closest('.doc-row');
@@ -356,6 +361,11 @@ async function beginRename(id) {
       event.preventDefault(); void renameDoc(id, input.value, input);
     }
   });
+}
+function startRename() {
+  const id = current?.id;
+  if (!id) { say('이름을 바꿀 문서를 선택하세요.'); return; }
+  void beginRename(id);
 }
 function renameDoc(id, name, input) {
   const candidateId = id.slice(0, id.lastIndexOf('/') + 1) + name.normalize('NFC');
@@ -449,7 +459,7 @@ copyPathButton.addEventListener('click', () => { void copyDocumentPath(current?.
 document.addEventListener('keydown', event => {
   if (!isNewDocShortcut(event)) return;
   event.preventDefault();
-  if (!creating) void newDocument();
+  requestNewDocument();
 });
 document.addEventListener('keydown', event => {
   const cmd = event.metaKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'r';
@@ -606,6 +616,11 @@ async function importFiles(project, files) {
 saveButton.addEventListener('click', () => { void save(); });
 try {
   studio = await createStudio('#studio', { studioUrl: '/studio/?chrome=embed' });
-  studio.onLidgeEvent((event) => { if (event.event === 'lidge.hostSaveRequested') void save(); });
+  studio.onLidgeEvent((event) => dispatchHostEvent(event, {
+    save: () => void save(),
+    rename: () => startRename(),
+    copyPath: () => void copyDocumentPath(current?.id ?? null),
+    newDocument: () => requestNewDocument(),
+  }));
   await loadDocs();
 } catch (error) { say(`편집기 시작 실패: ${error.message}`); }

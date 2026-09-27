@@ -600,6 +600,7 @@ export class InputHandler {
       div.setAttribute('spellcheck', 'false');
       div.setAttribute('inputmode', 'text');
       div.setAttribute('aria-label', '문서 편집 입력');
+      div.dataset.rhwpEditorInput = 'true';
       inputHost.appendChild(div);
       // textarea 인터페이스 호환을 위한 프록시
       Object.defineProperty(div, 'value', {
@@ -616,6 +617,7 @@ export class InputHandler {
       this.textarea.setAttribute('autocapitalize', 'off');
       this.textarea.setAttribute('spellcheck', 'false');
       this.textarea.setAttribute('aria-label', '문서 편집 입력');
+      this.textarea.dataset.rhwpEditorInput = 'true';
       inputHost.appendChild(this.textarea);
     }
 

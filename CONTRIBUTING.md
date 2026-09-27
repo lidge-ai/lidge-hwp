@@ -24,6 +24,7 @@ npm test
 MCP 재열기와 탭 연동은 `node --test test/live-tab.test.mjs`로 확인한다. 빌드된 WASM으로 빈 문서를
 테스트 안에서 만들므로 개인 문서 fixture가 필요 없다.
 Studio embed 또는 agent-ops 변경 시 npm run build:studio, npm --prefix rhwp/rhwp-studio test, npm test를 각각 실행하고 실제 실행 수·skip·실패를 보고한다. apply 상태 불명과 recovered:true의 경계는 test/live-tab.test.mjs와 Studio 단위 테스트로 확인한다.
+Studio의 호스트 단축키를 바꾸면 chrome-mode, lidge-host-v1 transport, npm wrapper 타입, 셸 핸들러를 함께 검증하고 npm run build:studio를 실행한다. 단독 Studio와 ⌥C 서식 복사는 회귀 기준이다.
 
 CI는 push·PR에서 자동으로 돌지 않는 수동 실행 전용이다. 병합 전 검증이 필요하면
 `gh workflow run ci.yml --ref <branch>`로 실행하고 결과 링크를 PR에 붙인다.

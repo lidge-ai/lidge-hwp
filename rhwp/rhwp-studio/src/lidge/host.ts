@@ -8,7 +8,8 @@ export interface LidgeExport {
   contentLoss: ContentLossReport;
 }
 export interface LidgeEvent {
-  event: 'lidge.hostSaveRequested';
+  event: 'lidge.hostSaveRequested' | 'lidge.hostRenameRequested'
+    | 'lidge.hostCopyPathRequested' | 'lidge.hostNewRequested';
   payload: { schemaVersion: 1 };
 }
 
@@ -24,12 +25,14 @@ export function onLidgeHostEvent(listener: (event: LidgeEvent) => void): () => v
   return () => listeners.delete(listener);
 }
 
-export function requestLidgeHostSave(): boolean {
+export function requestLidgeHostAction(eventName: LidgeEvent['event']): boolean {
   if (!hostConnected) return false;
-  const event: LidgeEvent = { event: 'lidge.hostSaveRequested', payload: { schemaVersion: 1 } };
+  const event: LidgeEvent = { event: eventName, payload: { schemaVersion: 1 } };
   for (const listener of listeners) listener(event);
   return true;
 }
+
+export const requestLidgeHostSave = () => requestLidgeHostAction('lidge.hostSaveRequested');
 
 export function exportWithReport(wasm: WasmBridge, format: LidgeFormat): LidgeExport {
   if (wasm.requiresPasswordForSave) throw new Error('암호화 문서는 호스트 저장을 지원하지 않습니다');
