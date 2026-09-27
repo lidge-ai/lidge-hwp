@@ -104,6 +104,15 @@ jobs:
       - name: Tests (shard ${{ matrix.shard }}/3)
         # 비공개 문서 픽스처 테스트는 배포하지 않으므로 skipped로 보고된다.
         run: node --test --test-shard=${{ matrix.shard }}/3 test/*.test.mjs
+      - name: Studio targeted tests (shard 1 only)
+        # Studio 전체 스위트에는 기존 실패가 있어 넣지 않는다. 셀 블록 지우기·⌘A 회귀만 돈다.
+        if: matrix.shard == 1
+        working-directory: rhwp/rhwp-studio
+        run: |
+          npm ci
+          node --test tests/cell-block-cmd-delete.test.ts tests/issue-6741-cellblock-delete-undo.test.ts \
+            tests/select-all-cmd-a.test.ts tests/mutation-routing-guard.test.ts \
+            tests/ime-shortcut-routing.test.ts tests/issue-3414-shortcut-routing.test.ts
 
   lint:
     name: lint
