@@ -59,6 +59,7 @@ export async function createEditor(container, options = {}) {
 
   // iframe 생성
   const iframe = document.createElement('iframe');
+  iframe.title = '한글 문서 편집기';
   iframe.src = studioUrl;
   iframe.style.width = options.width || '100%';
   iframe.style.height = options.height || '100%';

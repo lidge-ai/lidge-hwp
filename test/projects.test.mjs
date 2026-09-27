@@ -170,3 +170,23 @@ test('external ids group by UUID and unavailable roots retain label, path, and r
     assert.equal(imports, 0);
   } finally { delete globalThis.document; }
 });
+
+test('editing replaces the document slot and new draft creates its group row', () => {
+  globalThis.document = { createElement: fakeElement, createElementNS: (_ns, tag) => fakeElement(tag) };
+  try {
+    const { primary } = groupDocs([{ id: 'P/a.hwp', format: 'hwp' }], ['P']);
+    const rename = fakeElement('ul');
+    renderProjects(rename, primary, { edit: { kind: 'rename', id: 'P/a.hwp', label: 'P/a.hwp',
+      draft: 'a', extension: '.hwp' } });
+    const renamed = walk(rename);
+    assert.equal(renamed.filter(node => node.className === 'doc').length, 0);
+    assert.equal(renamed.find(node => node.className === 'rename-input').value, 'a');
+    assert.equal(renamed.find(node => node.className === 'doc-extension').textContent, '.hwp');
+    const created = fakeElement('ul');
+    renderProjects(created, [], { edit: { kind: 'new', groupKey: '', draft: '새 문서', extension: '.hwp' } });
+    const nodes = walk(created);
+    assert.ok(nodes.find(node => node.className.includes('new-doc-row')));
+    assert.equal(nodes.find(node => node.className === 'group-label').textContent, '기타');
+    assert.equal(nodes.filter(node => node.className === 'empty').length, 0);
+  } finally { delete globalThis.document; }
+});
