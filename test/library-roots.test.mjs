@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rename, symlink, stat, rm, chmod, cp } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rename, symlink, stat, rm, chmod, cp, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -112,6 +112,36 @@ test('registry serializes concurrent mutations and rejects invalid saved identit
     { code: 'ROOTS_INVALID', status: 500 });
 });
 
+test('BUG-R1 separate registry instances preserve sequential and concurrent additions', async t => {
+  const f = await fixture(t);
+  const peer = await createRootsRegistry({ docsRoot: f.docs, stateDir: f.stateDir });
+  const folders = ['second', 'third', 'fourth', 'fifth'].map(name => join(f.root, name));
+  await Promise.all(folders.map(path => mkdir(path)));
+  const first = await f.registry.register(folders[0]);
+  const second = await peer.register(folders[1]);
+  const [third, fourth] = await Promise.all([
+    f.registry.register(folders[2]), peer.register(folders[3]),
+  ]);
+  const expected = new Set([f.added.key, first.key, second.key, third.key, fourth.key]);
+  const disk = JSON.parse(await readFile(join(f.stateDir, 'roots.json'), 'utf8'));
+  assert.deepEqual(new Set(disk.roots.map(r => r.key)), expected);
+  assert.deepEqual(new Set((await f.registry.list()).map(r => r.key)), expected);
+  assert.deepEqual(new Set((await peer.list()).map(r => r.key)), expected);
+});
+
+test('BUG-R1 fresh registry lock returns ROOTS_BUSY and stale lock is replaced', async t => {
+  const f = await fixture(t);
+  const next = join(f.root, 'next'); await mkdir(next);
+  const lock = join(f.stateDir, 'roots.json.lock');
+  await writeFile(lock, 'owner', { mode: 0o600 });
+  await assert.rejects(f.registry.register(next), { code: 'ROOTS_BUSY', status: 503 });
+  const stale = new Date(Date.now() - 31_000);
+  await utimes(lock, stale, stale);
+  await f.registry.register(next);
+  await assert.rejects(stat(lock), { code: 'ENOENT' });
+  assert.equal((await f.registry.list()).length, 2);
+});
+
 test('external listing and opening exclude hidden and symlink paths', async t => {
   const f = await fixture(t);
   await mkdir(join(f.extra, '.hidden'));
@@ -155,6 +185,54 @@ test('external PUT commits only selected path in shadow history', async t => {
   assert.equal((await git('git', ['--git-dir', join(f.stateDir, 'history', f.added.key), '--work-tree', f.extra,
     'show', '--format=', '--name-only', 'HEAD'])).stdout.trim(), 'a.hwpx');
   assert.equal((await readdir(f.extra)).includes('.git'), false);
+});
+
+test('BUG-R2 literal pathspec commits only the selected document in external and primary roots', async t => {
+  const f = await fixture(t); const { base } = await f.start();
+  const literal = ':(glob)*.hwpx';
+  for (const root of [f.extra, f.docs]) {
+    await writeFile(join(root, literal), HWPX);
+    await writeFile(join(root, 'other.hwpx'), HWPX);
+  }
+  for (const [id, root, gitDir] of [
+    [`ext://${f.added.key}/${literal}`, f.extra, join(f.stateDir, 'history', f.added.key)],
+    [literal, f.docs, null],
+  ]) {
+    const put = await putDocument(base, id, Buffer.concat([HWPX, Buffer.from('updated')]));
+    assert.equal(put.status, 200, await put.text());
+    const args = gitDir ? ['--git-dir', gitDir, '--work-tree', root] : ['-C', root];
+    assert.equal((await git('git', [...args, 'show', '--format=', '--name-only', 'HEAD'])).stdout.trim(), literal);
+    assert.equal((await git('git', [...args, 'ls-files', '--', 'other.hwpx'])).stdout.trim(), '');
+  }
+});
+
+test('BUG-R3 inherited GIT environment cannot redirect external or primary commits', async t => {
+  const f = await fixture(t); const { base, server } = await f.start();
+  const extra = join(f.root, 'another'); await mkdir(extra);
+  await writeFile(join(extra, 'x.hwpx'), HWPX);
+  const hostile = {
+    GIT_INDEX_FILE: join(f.root, 'bogus.index'),
+    GIT_DIR: join(f.root, 'bogus.git'),
+    GIT_WORK_TREE: join(f.root, 'bogus.worktree'),
+  };
+  const previous = Object.fromEntries(Object.keys(hostile).map(key => [key, process.env[key]]));
+  Object.assign(process.env, hostile);
+  t.after(() => { for (const [key, value] of Object.entries(previous)) {
+    if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  } });
+  const added = await server.store.register(extra);
+  for (const id of [`ext://${added.key}/x.hwpx`, 'a.hwpx']) {
+    const put = await putDocument(base, id, Buffer.concat([HWPX, Buffer.from('updated')]));
+    assert.equal(put.status, 200, await put.text());
+  }
+  const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+  const shadow = join(f.stateDir, 'history', added.key);
+  assert.ok((await stat(join(shadow, 'index'))).isFile());
+  assert.equal((await git('git', ['--git-dir', shadow, '--work-tree', extra, 'show', '--format=', '--name-only', 'HEAD'],
+    { env: cleanEnv })).stdout.trim(), 'x.hwpx');
+  assert.equal((await git('git', ['-C', f.docs, 'show', '--format=', '--name-only', 'HEAD'],
+    { env: cleanEnv })).stdout.trim(), 'a.hwpx');
+  for (const path of Object.values(hostile)) await assert.rejects(stat(path), { code: 'ENOENT' });
 });
 
 test('external commit failure restores bytes and index', async t => {
