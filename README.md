@@ -156,6 +156,17 @@ Rust를 바꿨다면 WASM·Studio와 CLI를 함께 빌드해야 한다.
 vendored 엔진의 전체 회귀 테스트에 필요한 일부 원본 문서도 제외되어 있으므로,
 엔진 전체 테스트를 실행하려면 배포 권한이 있는 별도 fixture를 준비해야 한다.
 
+GitHub Actions CI는 push와 PR에서 자동으로 돌지 않는다. 필요할 때 브랜치를 지정해 직접 실행한다.
+
+```sh
+gh workflow run ci.yml --ref <branch>
+gh run watch "$(gh run list --workflow ci.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
+```
+
+CI는 WASM·Studio를 한 번 빌드해 `build/`를 넘기고, 테스트를 세 샤드로 나눠 macOS arm64에서 돌린다.
+빌드가 필요 없는 메타데이터·셸 문법 검사는 따로 돈다. 마지막 `ci` 잡이 모든 잡의 성공을 확인한다.
+로컬에서 같은 샤드를 재현하려면 `node --test --test-shard=1/3 test/*.test.mjs`처럼 실행한다(1/3, 2/3, 3/3).
+
 - [기여 안내](CONTRIBUTING.md)
 - [보안 안내](SECURITY.md)
 - [MIT 라이선스](LICENSE)
