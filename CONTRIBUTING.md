@@ -18,6 +18,7 @@ npm test
 검증에는 별도 임시 문서함을 사용하고 작업 중인 문서를 대상으로 실행하지 않는다.
 다중 루트 테스트는 `createServer({ docsRoot, stateDir, startAgentSocket: null })`로 임시 문서함과 상태 디렉터리를 주입한다. 실제 `~/.lidge-hwp/roots.json`이나 사용자 폴더를 fixture로 쓰지 않는다. 섀도 Git 테스트는 원본 폴더에 `.git`가 생기지 않는지, 대상 파일 하나만 커밋되는지, 실패 때 바이트와 index가 복구되는지 확인한다.
 외부 폴더 API 테스트는 `createServer`의 `pickFolder` 주입과 임시 `stateDir`을 사용한다. 실제 Finder 창·취소·macOS 자동화 권한은 로그인한 사람의 화면에서 확인하며, 테스트가 사용자 홈의 등록 파일이나 문서를 변경하면 안 된다.
+이름 변경 테스트는 두 파일명과 두 Git index 항목의 실패 전후 값을 비교한다. 커밋 실패 시 원래 이름·바이트·index·임대가 유지되는지, 복구 실패 시 양쪽 id가 격리되는지 확인한다. 대소문자/NFC 충돌은 실제 볼륨과 임시 fixture에서 각각 확인한다. 사이드바의 F2가 기본 단축키이며 ⌘⇧R은 브라우저 새로고침과 충돌할 수 있으므로 실제 macOS Chromium 키 입력은 사람이 확인한다.
 MCP 재열기와 탭 연동은 `node --test test/live-tab.test.mjs`로 확인한다. 빌드된 WASM으로 빈 문서를
 테스트 안에서 만들므로 개인 문서 fixture가 필요 없다.
 Studio embed 또는 agent-ops 변경 시 npm run build:studio, npm --prefix rhwp/rhwp-studio test, npm test를 각각 실행하고 실제 실행 수·skip·실패를 보고한다. apply 상태 불명과 recovered:true의 경계는 test/live-tab.test.mjs와 Studio 단위 테스트로 확인한다.

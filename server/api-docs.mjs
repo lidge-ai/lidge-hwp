@@ -83,9 +83,39 @@ export function createDocsApi({ store, tabs, pickFolder }) {
       return true;
     }
     if (!pathname.startsWith('/api/docs/')) return false;
+    const isRename = pathname.endsWith('/rename');
+    const rawId = pathname.slice('/api/docs/'.length, isRename ? -'/rename'.length : undefined);
     let id;
-    try { id = decodeURIComponent(pathname.slice('/api/docs/'.length)); }
+    try { id = decodeURIComponent(rawId); }
     catch { error(res, 400, 'INVALID_ID'); return true; }
+    if (isRename) {
+      if (req.method !== 'POST') { error(res, 405, 'METHOD_NOT_ALLOWED'); return true; }
+      try {
+        if (store.isQuarantined(id)) { error(res, 423, 'DOCUMENT_QUARANTINED'); return true; }
+        await store.resolveId(id);
+        const data = JSON.parse((await body(req, 8192)).toString('utf8'));
+        if (!data || typeof data !== 'object' || Array.isArray(data)
+            || Object.keys(data).length !== 1 || typeof data.name !== 'string') {
+          error(res, 400, 'INVALID_NAME'); return true;
+        }
+        const etag = req.headers['if-match'];
+        if (typeof etag !== 'string' || !/^"[0-9a-f]{64}"$/.test(etag)) {
+          error(res, 400, 'INVALID_ETAG'); return true;
+        }
+        const lease = req.headers['x-lease'];
+        const busy = tabs.canRename(lease, id);
+        if (busy) { error(res, busy === 'LEASE_REQUIRED' || busy === 'DOC_RESERVED' ? 409 : 423, busy); return true; }
+        const renamed = await store.renameDocument(id, data.name, {
+          expectedSha256: etag.slice(1, -1), assertLease: newId => tabs.canRename(lease, id, newId),
+        });
+        tabs.release(lease);
+        send(res, 200, renamed);
+      } catch (cause) {
+        const code = cause instanceof SyntaxError ? 'INVALID_JSON' : cause.code || 'RENAME_FAILED';
+        error(res, cause.status || (code === 'INVALID_JSON' ? 400 : 500), code);
+      }
+      return true;
+    }
     if (req.method === 'GET') {
       try {
         const doc = await store.read(id);
@@ -99,6 +129,7 @@ export function createDocsApi({ store, tabs, pickFolder }) {
     if (req.method !== 'PUT') { error(res, 405, 'METHOD_NOT_ALLOWED'); return true; }
     let agentRequestId, lockToken, outcome = null;
     try {
+      if (store.isQuarantined(id)) { error(res, 423, 'DOCUMENT_QUARANTINED'); return true; }
       // wp3 resolves a pending agent.apply request to its server-held lock token.
       // An arbitrary header cannot authorize the write.
       agentRequestId = req.headers['x-agent-request-id'];

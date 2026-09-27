@@ -21,7 +21,8 @@ const json = (res, status, value) => {
 };
 function requiresOrigin(pathname, method) {
   return (method === 'POST' && pathname === '/api/roots/pick')
-    || (method === 'DELETE' && pathname.startsWith('/api/roots/'));
+    || (method === 'DELETE' && pathname.startsWith('/api/roots/'))
+    || (method === 'POST' && pathname.startsWith('/api/docs/') && pathname.endsWith('/rename'));
 }
 async function readSmallJson(req) {
   const chunks = [];
@@ -62,9 +63,9 @@ async function staticFile(res, base, name) {
 
 export async function createServer({ docsRoot = DOCS_ROOT, buildDir = BUILD_DIR,
     stateDir = STATE_DIR, startAgentSocket = startAgentSocketImpl, agentConfig = {},
-    pickFolder = defaultPickFolder } = {}) {
+    pickFolder = defaultPickFolder, renameOps = {} } = {}) {
   await ensureRepo(docsRoot);
-  const store = await createLibrary({ docsRoot, stateDir });
+  const store = await createLibrary({ docsRoot, stateDir, renameOps });
   if (typeof pickFolder !== 'function') throw new TypeError('pickFolder');
   const tabs = createTabs();
   const docsApi = createDocsApi({ store, tabs, pickFolder });
@@ -119,6 +120,9 @@ export async function createServer({ docsRoot = DOCS_ROOT, buildDir = BUILD_DIR,
       if (url.pathname === '/api/tabs' && req.method === 'POST') {
         try {
           const data = await readSmallJson(req);
+          if (store.isQuarantined(data.docId)) {
+            json(res, 423, { error: { code: 'DOCUMENT_QUARANTINED', message: 'DOCUMENT_QUARANTINED' } }); return;
+          }
           await store.resolveId(data.docId);
           const reservation = typeof data.reservation === 'string' ? data.reservation : null;
           // 에이전트가 이 문서의 잠금을 쥔 동안(디스크 경로 저장 포함)에는 탭을 새로 열 수 없다. 열면 저장 전 바이트를

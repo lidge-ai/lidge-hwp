@@ -70,3 +70,23 @@ test('사이드바 토글·구분선 마크업과 접힘 CSS·저장 키가 셸�
   assert.doesNotMatch(css, /calc\(100dvh/); // 고정 뺄셈 높이가 남지 않는다
   assert.doesNotMatch(css, /h1 \{ display: none/); // 좁은 폭에서도 h1은 접근성 트리에 남는다
 });
+
+test('rename controls, F2 handling, and inline focus styles are served', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'lidge-rename-static-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const docs = join(root, 'docs'); await mkdir(docs);
+  await git('git', ['-C', docs, 'init', '-q']);
+  const server = await createServer({ docsRoot: docs, stateDir: join(root, 'state'), startAgentSocket: null });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const app = await (await fetch(base + '/app.mjs')).text();
+  const projects = await (await fetch(base + '/projects.mjs')).text();
+  const css = await (await fetch(base + '/style.css')).text();
+  assert.match(app, /event\.key === 'F2'/);
+  assert.match(app, /event\.metaKey && event\.shiftKey/);
+  assert.match(app, /candidateId = id\.slice/);
+  assert.match(projects, /className = 'doc-rename'/);
+  assert.match(projects, /contextmenu/);
+  assert.match(css, /\.rename-input:focus-visible/);
+});
