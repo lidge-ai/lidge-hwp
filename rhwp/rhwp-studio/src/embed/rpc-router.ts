@@ -2,6 +2,7 @@ import type { HmlSaveState } from '../core/hml-save-capability.ts';
 import type { EmbedFontDecisionTraceV1 } from '../core/font-decision-trace.ts';
 import type { ContentLossReport } from '../core/export-content-loss.ts';
 import type { AgentApplyReceipt, AgentBatch, AgentCell, AgentRollbackResult } from '../lidge/agent-ops.ts';
+import { LidgeAgentError } from '../lidge/errors.ts';
 import {
   assertEmptyParams,
   assertOnlyParam,
@@ -182,9 +183,13 @@ export async function routeEmbedRequest(
           || typeof params.token !== 'string' || !params.token) throw new Error('lockInput params invalid');
       return handlers.lidgeLockInput(params.on, params.reason, params.token);
     }
-    case 'lidge.applyOps':
-      assertOnlyKeys(params, ['batch'], 'lidge.applyOps params');
+    case 'lidge.applyOps': {
+      try { assertOnlyKeys(params, ['batch'], 'lidge.applyOps params'); }
+      catch (error) {
+        throw new LidgeAgentError('INVALID_BATCH', error instanceof Error ? error.message : String(error), true);
+      }
       return handlers.lidgeApplyOps(params.batch as AgentBatch); // op 모양은 agent-ops.ts assertBatch가 다시 검증
+    }
     case 'lidge.rollbackOps': {
       assertOnlyKeys(params, ['token', 'commandId', 'beforeDocumentSha256'], 'lidge.rollbackOps params');
       const { token, commandId, beforeDocumentSha256 } = params;

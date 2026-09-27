@@ -6,6 +6,8 @@ export function startAgentChannel({ editor, events, docId, lease, getDiskSha, se
   let disconnected = false; // SSE가 끊긴 뒤에는 저장 확정 후 잠금만 풀고 Save는 계속 막는다(새 lease 필요)
   let reloadRequired = false; // 디스크는 커밋됐는데 탭이 옛 문서다(kordoc reload 실패). 새로고침만 복구
   let applyDone = Promise.resolve(); // 진행 중인 agent.apply 처리기. release는 이것이 끝난 뒤에만 처리한다
+  let releaseDone = Promise.resolve(); // 다음 prepare는 release 처리 뒤에만 시작한다
+  let releasing = false;
   const fileName = docId.split('/').at(-1);
   const FOLLOW_WHY = { DIRTY: '저장하지 않은 편집이 있어', SAVING: '저장 중이라', BUSY: '다른 작업 중이라', ISOLATED: '이 탭이 격리돼 있어' };
   const unlock = token => editor.lidge.request('lockInput', { on: false, reason: '', token });
@@ -90,6 +92,10 @@ export function startAgentChannel({ editor, events, docId, lease, getDiskSha, se
       }
     } catch (error) {
       const code = error?.code || error?.message || 'AGENT_FAILED';
+      const cause = error?.cause;
+      const causeCode = cause ? (typeof cause.code === 'string' ? cause.code : 'APPLY_OPS_ERROR') : null;
+      const causeMessage = cause ? String(cause.message || cause) : null;
+      const message = cause ? `${code}: ${causeCode}: ${causeMessage}` : String(error?.message || error);
       let rollback = null;
       if (msg.type === 'agent.apply' && applyState?.applied && !applyState.saved && applyState.putStarted) {
         // PUT을 보낸 뒤 실패: 서버가 이미 커밋했을 수 있다. 서버 저장 작업 상태로만 판단한다.
@@ -115,15 +121,16 @@ export function startAgentChannel({ editor, events, docId, lease, getDiskSha, se
         rollback = await rollbackAppliedBatch(applyState.applied).catch(e => ({ ok: false, code: e?.code || e?.message || 'ROLLBACK_FAILED' }));
         if (!rollback.ok) isolated = true;
       }
-      if (isolated) showStatus('AI 편집 결과를 확정할 수 없음 · 이 탭은 잠긴 채 격리됨 · 새로고침으로 복구');
-      else showStatus(`AI 편집 실패: ${code}`);
+      if (isolated) showStatus(`AI 편집 결과를 확정할 수 없음 (${causeCode ?? code}: ${causeMessage ?? message}) · 이 탭은 잠긴 채 격리됨 · 새로고침으로 복구`);
+      else showStatus(`AI 편집 실패: ${message}`);
       // 연결이 끊긴 뒤 apply가 확정 실패로 끝났다면 release가 오지 않으므로 스스로 푼다.
       if (msg.type === 'agent.apply' && disconnected && !isolated && active) {
         await unlock(active).catch(() => {});
         active = null;
       }
       await reply(msg.requestId, { schemaVersion: 1, requestId: msg.requestId, ok: false,
-        error: { code, message: String(error?.message || error), recovered: error?.recovered ?? null },
+        error: { code, message, recovered: error?.recovered ?? null,
+          ...(cause ? { causeCode, causeMessage } : {}) },
         tab: { applied: Boolean(applyState?.applied), committed: Boolean(applyState?.saved), rollback, isolated },
       }).catch(e => showStatus(`응답 전송 실패: ${e.message}`));
     }
@@ -166,42 +173,57 @@ export function startAgentChannel({ editor, events, docId, lease, getDiskSha, se
         tab: { isolated: true, reloadRequired } }).catch(() => {});
       return;
     }
-    if (msg.reload) {
+    releasing = true;
+    try {
+      if (msg.reload) {
+        try {
+          const response = await fetch(`/api/docs/${encodeURIComponent(docId)}`, { cache: 'no-store' });
+          if (!response.ok) throw new Error('RELOAD_FAILED');
+          const bytes = await response.arrayBuffer();
+          editor.element.inert = true;       // 잠금을 푼 뒤 loadFile이 끝날 때까지 사람 입력을 막는다
+          if (active) await unlock(active);  // studio loadFile은 잠금 중 거절한다(main.ts loadFile 핸들러)
+          await editor.loadFile(bytes, fileName, { skipUnsavedGuard: true });
+          setDiskSha(msg.reload.diskSha256);
+          active = null; // loadFile 전에 이미 잠금을 풀었다
+        } catch (error) {
+          // 디스크는 이미 커밋됐는데 탭은 옛 문서다. 풀어 두면 옛 문서를 편집·저장하게 되므로 격리한다.
+          reloadRequired = true;
+          await holdTab(msg.token, '디스크는 커밋됨 · 새로고침 필요');
+          await reply(msg.requestId, { schemaVersion: 1, requestId: msg.requestId, ok: true,
+            error: { code: 'RELOAD_FAILED', message: String(error?.message || error), recovered: null },
+            tab: { isolated: true, reloadRequired: true } }).catch(() => {});
+          return;
+        }
+      }
+      if (!editor.element.inert) editor.element.inert = true;
+      if (active) {
+        try { await unlock(active); }
+        catch (error) {
+          await holdTab(active, `입력 잠금 해제 실패: ${error?.message || error} · 새로고침으로 복구`);
+          await reply(msg.requestId, { schemaVersion: 1, requestId: msg.requestId, ok: true,
+            tab: { isolated: true, reloadRequired } }).catch(() => {});
+          return;
+        }
+      }
+      const released = active;
+      active = null;
+      applyState = null;
       try {
-        const response = await fetch(`/api/docs/${encodeURIComponent(docId)}`, { cache: 'no-store' });
-        if (!response.ok) throw new Error('RELOAD_FAILED');
-        const bytes = await response.arrayBuffer();
-        editor.element.inert = true;       // 잠금을 푼 뒤 loadFile이 끝날 때까지 사람 입력을 막는다
-        if (active) await unlock(active);  // studio loadFile은 잠금 중 거절한다(main.ts loadFile 핸들러)
-        await editor.loadFile(bytes, fileName, { skipUnsavedGuard: true });
-        editor.element.inert = false;
-        setDiskSha(msg.reload.diskSha256);
-      } catch (error) {
-        // 디스크는 이미 커밋됐는데 탭은 옛 문서다. 풀어 두면 옛 문서를 편집·저장하게 되므로 격리한다.
-        reloadRequired = true;
-        await holdTab(msg.token, '디스크는 커밋됨 · 새로고침 필요');
-        await reply(msg.requestId, { schemaVersion: 1, requestId: msg.requestId, ok: true,
-          error: { code: 'RELOAD_FAILED', message: String(error?.message || error), recovered: null },
-          tab: { isolated: true, reloadRequired: true } }).catch(() => {});
+        // 입력 잠금 해제 뒤 서버 응답을 확인한다. 그동안 Save와 사람 입력은 차단한다.
+        const header = { schemaVersion: 1, requestId: msg.requestId, ok: true };
+        const response = await fetch(`/api/agent/replies/${encodeURIComponent(msg.requestId)}`, { method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Lease': lease }, body: JSON.stringify(header) });
+        if (!response.ok) throw new Error(`REPLY_HTTP_${response.status}`);
+      } catch {
+        // 응답만 유실됐다면 서버는 격리하지 않았을 수도 있다.
+        await holdTab(released ?? msg.token, msg.reload ? '디스크는 커밋됨 · 새로고침 필요'
+          : 'unlock 또는 release 응답이 확인되지 않음 · 이 탭은 잠긴 채 격리됨 · 새로고침으로 복구');
         return;
       }
-    }
-    try {
-      // 서버가 이 응답을 받아야 runner가 문서 잠금을 푼다. 응답이 받아들여진 뒤에만 탭 잠금을 푼다.
-      const header = { schemaVersion: 1, requestId: msg.requestId, ok: true };
-      const response = await fetch(`/api/agent/replies/${encodeURIComponent(msg.requestId)}`, { method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Lease': lease }, body: JSON.stringify(header) });
-      if (!response.ok) throw new Error(`REPLY_HTTP_${response.status}`);
-    } catch {
-      // 서버가 release를 이미 포기했다(45초 deadline → 임대 격리). 잠금·Save 차단을 유지한다.
-      await holdTab(msg.token, msg.reload ? '디스크는 커밋됨 · 새로고침 필요' : '서버가 이 탭을 격리함 · 새로고침으로 복구');
-      return;
-    }
-    if (active) await unlock(active).catch(error => showStatus(`입력 잠금 해제 실패: ${error.message}`));
-    active = null;
-    applyState = null;
-    setSaveLocked(false);
-    if (msg.reload) showStatus(`kordoc 저장 완료 · 커밋 ${msg.reload.commit} · 되돌리기 기록 초기화`);
+      setSaveLocked(false);
+      editor.element.inert = false;
+      if (msg.reload) showStatus(`kordoc 저장 완료 · 커밋 ${msg.reload.commit} · 되돌리기 기록 초기화`);
+    } finally { releasing = false; }
   }
 
   // agent.follow(wp5): 에이전트가 다른 문서(targetDocId)를 편집하려 한다. 바쁘면 확인 창 없이 거절하고 알림만 남긴다.
@@ -211,7 +233,7 @@ export function startAgentChannel({ editor, events, docId, lease, getDiskSha, se
     if (typeof msg.targetDocId !== 'string' || typeof msg.reservation !== 'string') return;
     let code;
     try {
-      code = isolated || reloadRequired ? 'ISOLATED' : active || applyState ? 'BUSY' : await canFollow();
+      code = isolated || reloadRequired ? 'ISOLATED' : active || applyState || releasing ? 'BUSY' : await canFollow();
     } catch { code = 'BUSY'; }
     if (disconnected) return; // 서버가 이 요청을 이미 TAB_DISCONNECTED로 정리했다
     const header = code ? { schemaVersion: 1, requestId: msg.requestId, ok: false, error: { code, message: code } }
@@ -228,11 +250,11 @@ export function startAgentChannel({ editor, events, docId, lease, getDiskSha, se
 
   // release는 진행 중인 apply가 확정(커밋·되돌림·격리·적용 안 됨)될 때까지 줄을 세운다.
   // apply 처리기는 모든 경로에서 reply 뒤 끝나므로 applyDone이 풀리면 applyState는 확정 상태다.
-  events.addEventListener('agent.prepare', event => { void onMessage(event); });
+  events.addEventListener('agent.prepare', event => { void releaseDone.then(() => onMessage(event)); });
   events.addEventListener('agent.apply', event => { applyDone = onMessage(event); });
   events.addEventListener('agent.release', event => {
     const msg = JSON.parse(event.data);
-    void applyDone.then(() => handleRelease(msg), () => handleRelease(msg));
+    releaseDone = applyDone.then(() => handleRelease(msg), () => handleRelease(msg)).catch(() => {});
   });
   events.addEventListener('agent.follow', event => { void handleFollow(JSON.parse(event.data)); });
   events.onerror = () => {
@@ -253,7 +275,7 @@ export function startAgentChannel({ editor, events, docId, lease, getDiskSha, se
     // 격리된 탭은 정리 경로에서도 잠금과 Save 차단을 유지한다. 복구는 새로고침뿐이다.
     if (isolated) throw Object.assign(new Error('LEASE_ISOLATED'), { code: 'LEASE_ISOLATED' });
     // 에이전트 작업이 끝나지 않았으면(prepare 뒤 release 전, 또는 apply 확정 전) 정리를 거부한다.
-    if (active || (applyState && !applyState.saved)) throw Object.assign(new Error('AGENT_BUSY'), { code: 'AGENT_BUSY' });
+    if (active || releasing || (applyState && !applyState.saved)) throw Object.assign(new Error('AGENT_BUSY'), { code: 'AGENT_BUSY' });
     setSaveLocked(false);
   };
 }
