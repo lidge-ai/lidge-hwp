@@ -118,6 +118,16 @@ async function main() {
     await until(() => cdp.eval(`return window.__writes.at(-1) === ${JSON.stringify(pathA)};`));
     console.log('PASS no row focus shortcut copies current path');
 
+    await cdp.eval(`window.__writes = []; document.querySelector('#doc-filter').focus();`);
+    const searchCopy = await cdp.eval(`const input = document.querySelector('#doc-filter');
+      const event = new KeyboardEvent('keydown', { key: 'C', code: 'KeyC', metaKey: true,
+        shiftKey: true, bubbles: true, cancelable: true });
+      input.dispatchEvent(event); return event.defaultPrevented;`);
+    assert.equal(searchCopy, true);
+    await until(() => cdp.eval(`return window.__writes.at(-1) === ${JSON.stringify(pathA)};`));
+    assert.match(await cdp.eval(`return document.querySelector('#status').textContent;`), /^경로 복사됨:/);
+    console.log('PASS search input Command-Shift-C copies current path and prevents browser default');
+
     await cdp.eval(`window.__writes = []; document.querySelector('#copy-path').click();`);
     await until(() => cdp.eval(`return window.__writes.at(-1) === ${JSON.stringify(pathA)};`));
     console.log('PASS header button copies current path');
@@ -133,7 +143,11 @@ async function main() {
       value: async value => { window.__writes.push(value); } });
       document.querySelector('.doc[data-id="a.hwp"]').parentElement.querySelector('.doc-rename').click();`);
     await until(() => cdp.eval(`return !!document.querySelector('.rename-input');`));
-    await shortcut(`document.querySelector('.rename-input')`);
+    const renameCopy = await cdp.eval(`const input = document.querySelector('.rename-input');
+      const event = new KeyboardEvent('keydown', { key: 'C', code: 'KeyC', metaKey: true,
+        shiftKey: true, bubbles: true, cancelable: true });
+      input.dispatchEvent(event); return event.defaultPrevented;`);
+    assert.equal(renameCopy, true);
     assert.deepEqual(await cdp.eval(`return window.__writes;`), []);
     console.log('PASS inline rename input ignores shortcut');
 
@@ -145,7 +159,7 @@ async function main() {
     const renamedPath = await realpath(join(docs, 'renamed.hwp'));
     await until(() => cdp.eval(`return window.__writes.at(-1) === ${JSON.stringify(renamedPath)};`));
     console.log('PASS button state and renamed current document path');
-    console.log('Browser checks: 6 passed, 0 failed');
+    console.log('Browser checks: 7 passed, 0 failed');
   } finally {
     cdp?.close();
     if (chrome && chrome.exitCode === null) {

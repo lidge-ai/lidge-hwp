@@ -66,9 +66,8 @@ export interface EmbedShortcutKeyEventLike {
 
 export type EmbedHostAction = 'lidge.hostRenameRequested' | 'lidge.hostCopyPathRequested' | 'lidge.hostNewRequested';
 
-export function embedHostAction(e: EmbedShortcutKeyEventLike & { code?: string; isComposing?: boolean }): EmbedHostAction | null {
-  if (e.isComposing) return null;
-  if (e.key === 'F2' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey)
+export function embedHostKey(e: EmbedShortcutKeyEventLike & { code?: string }): EmbedHostAction | null {
+  if ((e.code === 'F2' || e.key === 'F2') && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey)
     return 'lidge.hostRenameRequested';
   if (!e.metaKey || e.ctrlKey) return null;
   const code = e.code;
@@ -82,10 +81,25 @@ export function embedHostAction(e: EmbedShortcutKeyEventLike & { code?: string; 
   return null;
 }
 
+export function embedHostAction(e: EmbedShortcutKeyEventLike & { code?: string; isComposing?: boolean }): EmbedHostAction | null {
+  return e.isComposing ? null : embedHostKey(e);
+}
+
 export function shouldForwardHostShortcut(target: EventTarget | null, modalOpen: boolean): boolean {
   if (modalOpen) return false;
   if (!isTextEditingTarget(target)) return true;
   return (target as HTMLElement).closest?.('[data-rhwp-editor-input="true"]') != null;
+}
+
+export function hostShortcutDecision(
+  e: EmbedShortcutKeyEventLike & { code?: string; isComposing?: boolean },
+  target: EventTarget | null,
+  modalOpen: boolean,
+): { prevent: boolean; forward: EmbedHostAction | null } {
+  const key = embedHostKey(e);
+  if (!key) return { prevent: false, forward: null };
+  if (e.isComposing) return { prevent: true, forward: null };
+  return { prevent: true, forward: shouldForwardHostShortcut(target, modalOpen) ? key : null };
 }
 
 /**

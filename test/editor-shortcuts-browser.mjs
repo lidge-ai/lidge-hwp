@@ -141,6 +141,16 @@ async function main() {
     assert.match((await state()).status, /^경로 복사됨:/);
     console.log('PASS iframe Command-Shift-C copies current shell path');
 
+    const beforeFontShortcut = await state();
+    const fontShortcut = await cdp.eval(`const input = ${frame}.document.querySelector('#font-size');
+      input.focus();
+      const event = new KeyboardEvent('keydown', { key: 'C', code: 'KeyC', metaKey: true,
+        shiftKey: true, bubbles: true, cancelable: true });
+      input.dispatchEvent(event); return event.defaultPrevented;`);
+    assert.equal(fontShortcut, true);
+    assert.deepEqual(await state(), beforeFontShortcut);
+    console.log('PASS Studio font-size Command-Shift-C prevents browser default without shell action');
+
     assert.equal(await focusEditor(), true);
     const beforeNew = (await state()).posts;
     await key('n', 'KeyN', 5, 78);
@@ -178,6 +188,25 @@ async function main() {
     assert.equal((await state()).rename, false);
     assert.equal((await state()).writes.length, beforeFormat.writes.length);
     console.log(`PASS iframe Option-C does not invoke shell (input handler exposed: ${inputHandlerAvailable})`);
+
+    assert.equal(await focusEditor(), true);
+    await cdp.eval(`const input = ${frame}.document.querySelector('[data-rhwp-editor-input="true"]');
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: '/', code: 'Slash', ctrlKey: true,
+        bubbles: true, cancelable: true }));`);
+    await until(() => cdp.eval(`return !!${frame}.document.querySelector('.cp-overlay');`));
+    const beforePaletteShortcut = await state();
+    const paletteShortcut = await cdp.eval(`const input = ${frame}.document.querySelector('[data-rhwp-editor-input="true"]');
+      input.focus();
+      const event = new KeyboardEvent('keydown', { key: 'C', code: 'KeyC', metaKey: true,
+        shiftKey: true, bubbles: true, cancelable: true });
+      input.dispatchEvent(event);
+      return { prevented: event.defaultPrevented, paletteOpen: !!${frame}.document.querySelector('.cp-overlay') };`);
+    assert.deepEqual(paletteShortcut, { prevented: true, paletteOpen: true });
+    assert.deepEqual(await state(), beforePaletteShortcut);
+    await cdp.eval(`${frame}.document.querySelector('.cp-input').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));`);
+    await until(() => cdp.eval(`return !${frame}.document.querySelector('.cp-overlay');`));
+    console.log('PASS Studio command palette Command-Shift-C prevents browser default without shell action');
 
     assert.equal(await focusEditor(), true);
     const beforeSave = (await state()).puts;
