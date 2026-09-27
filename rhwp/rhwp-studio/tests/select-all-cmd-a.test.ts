@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { handleDocumentSelectAllShortcut, isEditableShortcutTarget, isTextEditingTarget } from '../src/command/document-shortcut-guard.ts';
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const source = (path: string) => readFileSync(join(rootDir, path), 'utf8');
@@ -10,7 +11,6 @@ const source = (path: string) => readFileSync(join(rootDir, path), 'utf8');
 const keyboardSrc = source('src/engine/input-handler-keyboard.ts');
 const handlerSrc = source('src/engine/input-handler.ts');
 const cursorSrc = source('src/engine/cursor.ts');
-const mainSrc = source('src/main.ts');
 const bridgeSrc = source('src/core/wasm-bridge.ts');
 
 test('⌘A 는 셀 블록을 풀고 캐럿 셀 내용만 선택한다 — 본문 전체 선택보다 먼저', () => {
@@ -54,12 +54,69 @@ test('본문 선택 하이라이트가 범위 안 표의 rect 를 포함한다',
   assert.match(clr.slice(0, clr.indexOf('\n  }')), /bodyTableAnchorCache = null/);
 });
 
-test('활성 편집기 + textarea 밖 포커스에서 ⌘A 는 죽은 키가 아니다', () => {
-  const block = mainSrc.slice(mainSrc.indexOf('if (inputHandler?.isActive())'));
-  const chunk = block.slice(0, block.indexOf('    }\n\n'));
-  assert.match(chunk, /commandId === 'edit:select-all'/, '전역 경로가 select-all 을 처리해야 한다');
-  const sa = chunk.slice(chunk.indexOf("=== 'edit:select-all'"));
-  assert.match(sa, /preventDefault\(\)/);
-  assert.match(sa, /dispatchWithResult\(commandId\)|dispatch\(commandId\)/);
-  assert.match(sa, /inputHandler\.focus\(\)/, '포커스를 편집기 textarea로 돌려야 한다');
+type FakeElement = HTMLElement & { parentElement: FakeElement | null };
+
+function element(tagName: string, parentElement: FakeElement | null = null, options: {
+  contentEditable?: boolean;
+  role?: string;
+} = {}): FakeElement {
+  return {
+    tagName,
+    parentElement,
+    isContentEditable: options.contentEditable ?? false,
+    getAttribute: (name: string) => name === 'role' ? options.role ?? null : null,
+  } as FakeElement;
+}
+
+function invokeDocumentSelectAll(target: FakeElement, overlay: Pick<Element, 'isConnected'> | null = null) {
+  let dispatches = 0;
+  let focuses = 0;
+  let prevented = 0;
+  const handled = handleDocumentSelectAllShortcut(
+    { target, preventDefault: () => { prevented++; } },
+    overlay,
+    () => { dispatches++; },
+    () => { focuses++; },
+  );
+  return { handled, dispatches, focuses, prevented };
+}
+
+test('붙어 있는 modal-overlay에서는 문서 ⌘A를 dispatch하지 않는다', () => {
+  const body = element('BODY');
+  assert.deepEqual(invokeDocumentSelectAll(body, { isConnected: true }), {
+    handled: false, dispatches: 0, focuses: 0, prevented: 0,
+  });
+  assert.equal(invokeDocumentSelectAll(body, { isConnected: false }).dispatches, 1);
+});
+
+test('select, contentEditable 자손, role=textbox에서는 문서 ⌘A를 dispatch하지 않는다', () => {
+  const body = element('BODY');
+  const targets = [
+    element('SELECT', body),
+    element('SPAN', element('DIV', body, { contentEditable: true })),
+    element('SPAN', element('DIV', body, { role: 'textbox' })),
+    element('TEXTAREA', body),
+    element('INPUT', body),
+  ];
+  for (const target of targets) {
+    assert.equal(isEditableShortcutTarget(target), true, `${target.tagName} 편집 대상`);
+    assert.deepEqual(invokeDocumentSelectAll(target), {
+      handled: false, dispatches: 0, focuses: 0, prevented: 0,
+    });
+  }
+});
+
+test('body 대상 ⌘A는 문서 명령을 한 번 dispatch하고 편집기로 포커스를 돌린다', () => {
+  assert.deepEqual(invokeDocumentSelectAll(element('BODY')), {
+    handled: true, dispatches: 1, focuses: 1, prevented: 1,
+  });
+});
+
+test('select는 ⌘A만 막고 전역 문서 이동 키 가드에서는 글자 편집 대상이 아니다', () => {
+  const body = element('BODY');
+  const select = element('SELECT', body);
+  assert.equal(isEditableShortcutTarget(select), true);
+  assert.equal(isTextEditingTarget(select), false);
+  assert.equal(isTextEditingTarget(element('SPAN', element('DIV', body, { contentEditable: true }))), true);
+  assert.equal(isTextEditingTarget(body), false);
 });

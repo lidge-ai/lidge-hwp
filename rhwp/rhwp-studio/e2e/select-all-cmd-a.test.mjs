@@ -1,5 +1,5 @@
 import {
-  runTest, setTestCase, createNewDocument, clickEditArea, screenshot, assert,
+  runTest, setTestCase, createNewDocument, loadHwpFile, clickEditArea, screenshot, assert,
 } from './helpers.mjs';
 
 const pageErrors = [];
@@ -19,12 +19,12 @@ const settle = () => new Promise(r => setTimeout(r, 350));
 const resetModes = (page) => page.evaluate(() => {
   const ih = window.__inputHandler;
   const cur = ih.cursor;
+  cur.clearSelection();
   try { if (cur.isInCellSelectionMode?.()) cur.exitCellSelectionMode(); } catch {}
   try { if (cur.isInTableObjectSelection?.()) cur.exitTableObjectSelection?.(); } catch {}
   try { if (cur.isInPictureObjectSelection?.()) cur.exitPictureObjectSelection?.(); } catch {}
   try { if (cur.isInBlockSelectionMode?.()) cur.exitBlockSelectionMode(); } catch {}
   ih.cellSelectionRenderer?.clear?.();
-  ih.updateCaret?.();
 });
 
 const buildDoc = (page) => createNewDocument(page)
@@ -79,12 +79,12 @@ const selState = (page) => page.evaluate(() => {
   };
 });
 
-const cellText = (page, doc, row, col) => page.evaluate(({ paraIdx, controlIdx, row, col }) => {
+const cellText = (page, doc, row, col, cellParaIndex = 0) => page.evaluate(({ paraIdx, controlIdx, row, col, cellParaIndex }) => {
   const w = window.__wasm;
   const b = (w.getTableCellBboxes(0, paraIdx, controlIdx, 0) || []).find(x => x.row === row && x.col === col);
   if (!b) return null;
-  return w.getTextInCell(0, paraIdx, controlIdx, b.cellIdx, 0, 0, 100);
-}, { ...doc, row, col });
+  return w.getTextInCell(0, paraIdx, controlIdx, b.cellIdx, cellParaIndex, 0, 100);
+}, { ...doc, row, col, cellParaIndex });
 
 // 마지막 selectionRenderer.render 에 전달된 rect 목록을 캡처하는 spy.
 const installRectSpy = (page) => page.evaluate(() => {
@@ -161,6 +161,137 @@ await runTest('⌘A 전체 선택 — 셀/글상자 범위 + 표 하이라이트
     assert(await cellText(page, doc, 1, 1) === '', 'b: B2 만 지워짐');
     assert(await cellText(page, doc, 0, 0) === 'A1', 'b: 다른 셀 보존');
     assert(await cellText(page, doc, 2, 2) === 'C3', 'b: 다른 셀 보존');
+    await key(page, { key: 'z', code: 'KeyZ', meta: true });
+    await page.evaluate(settle);
+    assert(await cellText(page, doc, 1, 1) === 'B2', 'b: 편집 뒤 undo가 B2 원문을 복원');
+  }
+
+  // ── (c) 여러 문단 셀 → 첫 문단 시작부터 마지막 문단 끝까지 ──
+  {
+    setTestCase('c-multi-paragraph-cell');
+    const doc = await buildDoc(page);
+    await page.evaluate(async (d) => {
+      const w = window.__wasm;
+      const b = (w.getTableCellBboxes(0, d.paraIdx, d.controlIdx, 0) || [])
+        .find(x => x.row === 1 && x.col === 1);
+      if (!b) throw new Error('B2 셀 없음');
+      w.doc.splitParagraphInCell(0, d.paraIdx, d.controlIdx, b.cellIdx, 0, 2);
+      w.doc.insertTextInCell(0, d.paraIdx, d.controlIdx, b.cellIdx, 1, 0, 'SECOND');
+      await window.__canvasView?.loadDocument?.();
+    }, doc);
+    await caretInCell(page, doc, 1, 1);
+    await key(page, { key: 'a', code: 'KeyA', meta: true });
+    await page.evaluate(settle);
+    const s = await selState(page);
+    assert(s.hasSel, 'c: 여러 문단 셀 선택 있음');
+    assert(s.start.parentParaIndex === doc.paraIdx && s.end.parentParaIndex === doc.paraIdx,
+      'c: 범위 양끝이 같은 셀 내부');
+    assert(s.start.cellParaIndex === 0 && s.start.charOffset === 0,
+      `c: 첫 문단 시작 (실제 ${JSON.stringify(s.start)})`);
+    assert(s.end.cellParaIndex === 1 && s.end.charOffset === 6,
+      `c: 마지막 문단 끝 (실제 ${JSON.stringify(s.end)})`);
+    assert(await cellText(page, doc, 1, 1, 0) === 'B2', 'c: 첫 문단 원문');
+    assert(await cellText(page, doc, 1, 1, 1) === 'SECOND', 'c: 둘째 문단 원문');
+  }
+
+  // ── (n) 런타임 HTML 붙여넣기로 만든 중첩 표의 안쪽 셀만 선택 ──
+  {
+    setTestCase('n-nested-table-cell');
+    await createNewDocument(page);
+    await resetModes(page);
+    const nested = await page.evaluate(async () => {
+      const w = window.__wasm;
+      const result = JSON.parse(w.pasteHtml(0, 0, 0,
+        '<table><tr><td>OUTER<table><tr><td>INNER</td><td>PEER</td></tr></table></td><td>OUTERPEER</td></tr></table>'));
+      if (!result.ok) throw new Error(`중첩 표 pasteHtml 실패: ${JSON.stringify(result)}`);
+      const controls = w.getControls();
+      const outer = controls.find(c => c.ctrlId === 'tbl' && c.list === 0);
+      const inner = controls.find(c => c.ctrlId === 'tbl' && c.list !== 0);
+      if (!outer || !inner) throw new Error(`중첩 표 컨트롤 없음: ${JSON.stringify(controls)}`);
+      const path = [
+        { controlIndex: outer.controlIndex, cellIndex: 0, cellParaIndex: inner.para },
+        { controlIndex: inner.controlIndex, cellIndex: 0, cellParaIndex: 0 },
+      ];
+      const text = w.getTextInCellByPath(0, outer.para, JSON.stringify(path), 0, 100);
+      if (text !== 'INNER') throw new Error(`안쪽 셀 내용 불일치: ${text}`);
+      await window.__canvasView?.loadDocument?.();
+      return { paraIdx: outer.para, path };
+    });
+    await page.evaluate(({ paraIdx, path }) => {
+      const ih = window.__inputHandler;
+      ih.cursor.moveTo({
+        sectionIndex: 0, paragraphIndex: 0, charOffset: 2,
+        parentParaIndex: paraIdx,
+        controlIndex: path[0].controlIndex, cellIndex: path[0].cellIndex,
+        cellParaIndex: path[1].cellParaIndex, cellPath: path,
+      });
+      ih.updateCaret(); ih.focus();
+    }, nested);
+    await key(page, { key: 'a', code: 'KeyA', meta: true });
+    await page.evaluate(settle);
+    const s = await selState(page);
+    assert(s.hasSel, 'n: 안쪽 셀 선택 있음');
+    assert(s.start.parentParaIndex === nested.paraIdx && s.end.parentParaIndex === nested.paraIdx,
+      'n: 범위 양끝이 표 내부');
+    assert(JSON.stringify(s.start.cellPath) === JSON.stringify(nested.path)
+      && JSON.stringify(s.end.cellPath) === JSON.stringify(nested.path),
+    `n: 범위가 안쪽 셀 깊이 2에 한정 (실제 ${JSON.stringify(s)})`);
+    assert(s.start.charOffset === 0 && s.end.charOffset === 5,
+      `n: INNER 텍스트 전체 범위 (실제 ${JSON.stringify(s)})`);
+    const texts = () => page.evaluate(({ paraIdx, path }) => {
+      const w = window.__wasm;
+      const read = (p) => w.getTextInCellByPath(0, paraIdx, JSON.stringify(p), 0, 100);
+      return {
+        inner: read(path),
+        peer: read(path.map((entry, i) => i === 1 ? { ...entry, cellIndex: 1 } : entry)),
+        outerPeer: w.getTextInCell(0, paraIdx, path[0].controlIndex, 1, 0, 0, 100),
+      };
+    }, nested);
+    await key(page, { key: 'Backspace' });
+    await page.evaluate(settle);
+    assert(JSON.stringify(await texts()) === JSON.stringify({ inner: '', peer: 'PEER', outerPeer: 'OUTERPEER' }),
+      'n: 편집은 안쪽 셀에만 적용');
+    await key(page, { key: 'z', code: 'KeyZ', meta: true });
+    await page.evaluate(settle);
+    assert(JSON.stringify(await texts()) === JSON.stringify({ inner: 'INNER', peer: 'PEER', outerPeer: 'OUTERPEER' }),
+      'n: undo가 안쪽 셀 원문을 복원');
+  }
+
+  // ── (h) 글상자 안 캐럿 → 글상자 텍스트만 선택 ──
+  {
+    setTestCase('h-textbox');
+    await resetModes(page);
+    await loadHwpFile(page, 'hml/formatting_table.hml');
+    const box = await page.evaluate(() => {
+      const w = window.__wasm;
+      const shape = w.getControls().find(c => c.ctrlId === 'gso' && c.list === 0);
+      if (!shape) throw new Error('샘플 글상자 없음');
+      const paraIdx = shape.para;
+      const controlIdx = shape.controlIndex;
+      const text = w.getTextInCell(0, paraIdx, controlIdx, 0, 0, 0, 100);
+      if (text !== 'textbox') throw new Error(`샘플 글상자 내용 불일치: ${text}`);
+      return { paraIdx, controlIdx, text };
+    });
+    await page.evaluate(({ paraIdx, controlIdx }) => {
+      const ih = window.__inputHandler;
+      ih.cursor.moveTo({
+        sectionIndex: 0, paragraphIndex: 0, charOffset: 2,
+        parentParaIndex: paraIdx, controlIndex: controlIdx,
+        cellIndex: 0, cellParaIndex: 0, isTextBox: true,
+        cellPath: [{ controlIndex: controlIdx, cellIndex: 0, cellParaIndex: 0 }],
+      });
+      ih.updateCaret(); ih.focus();
+    }, box);
+    await key(page, { key: 'a', code: 'KeyA', meta: true });
+    await page.evaluate(settle);
+    const s = await selState(page);
+    assert(s.hasSel, 'h: 글상자 안 선택 있음');
+    assert(s.start.parentParaIndex === box.paraIdx && s.end.parentParaIndex === box.paraIdx,
+      'h: 범위 양끝이 글상자 안');
+    assert(s.start.isTextBox === true && s.end.isTextBox === true, 'h: 글상자 문맥 유지');
+    assert(s.start.charOffset === 0 && s.end.charOffset === box.text.length,
+      `h: 글상자 텍스트 전체 범위 (실제 ${JSON.stringify(s)})`);
+    assert(s.start.cellIndex === 0 && s.end.cellIndex === 0, 'h: 선택은 샘플 글상자 내부');
   }
 
   // ── (d) 셀 블록(F5) → 블록 해제 + 현재 셀 선택 ──
