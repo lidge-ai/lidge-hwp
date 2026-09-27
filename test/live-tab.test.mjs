@@ -250,7 +250,8 @@ async function connectTab(t, base, lease) {
         const chunk = frames.slice(0, boundary); frames = frames.slice(boundary + 2);
         const name = chunk.split('\n')[0].slice('event: '.length);
         if (name !== 'heartbeat') seen.push(name);
-        if (name === type) return JSON.parse(chunk.split('\ndata: ')[1]);
+        if (name === type || (Array.isArray(type) && type.includes(name)))
+          return { ...JSON.parse(chunk.split('\ndata: ')[1]), eventType: name };
       } else {
         const { value, done } = await reader.read();
         if (done) throw new Error('SSE closed');
@@ -638,6 +639,49 @@ test('(F9) 저장 없는 편집은 release 뒤 followEnd none을 보낸다', asy
   assert.equal(server.store.isLocked('x.hwp'), false);
   assert.deepEqual(x.seen.slice(-3), ['agent.prepare', 'agent.release', 'agent.followEnd']);
   assert.equal(await head(root), before);
+});
+
+test('(P1) delayed follow refuses dirty or changed tab before mutation without saving', async t => {
+  for (const variant of ['dirty', 'different export']) await t.test(variant, async sub => {
+    const { root, base, socketPath, y } = await seedTwo(sub);
+    const bytes = await readFile(join(root, 'x.hwp'));
+    const before = await head(root);
+    const run = runCode(socketPath, "const h=await hwp.open('x.hwp'); await hwp.insertText(h,{paragraph:0,text:'agent edit'}); await hwp.save(h)");
+    const follow = await y.frame('agent.follow');
+    await y.reply(follow.requestId, { ok: true });
+    const claimed = await claimWith(base, 'x.hwp', follow.reservation);
+    assert.equal(claimed.status, 201);
+    const x = await connectTab(sub, base, (await claimed.json()).lease);
+    const prepare = await x.frame('agent.prepare');
+    let exportBytes = bytes;
+    if (variant === 'different export') {
+      const doc = await openDocument(bytes);
+      try {
+        applyOp(doc, newBatch({}), 'insertText', { paragraph: 0, text: 'human edit' });
+        exportBytes = Buffer.from(exportWithReport(doc, 'hwp').bytes);
+      } finally { doc.free(); }
+      assert.notEqual(sha(exportBytes), sha(bytes));
+    }
+    await x.reply(prepare.requestId, { ok: true, state: tabState('hwp', variant === 'dirty'),
+      diskSha256: sha(bytes), exportSha256: sha(exportBytes), contentLoss: noLoss('hwp') }, exportBytes);
+    const next = await x.frame(['agent.release', 'agent.apply']);
+    if (next.eventType === 'agent.apply') {
+      await x.reply(next.requestId, { ok: false, error: { code: 'UNEXPECTED_APPLY', message: 'UNEXPECTED_APPLY' } });
+    }
+    const release = next.eventType === 'agent.release' ? next : await x.frame('agent.release');
+    await x.reply(release.requestId, { ok: true });
+    const end = await x.frame('agent.followEnd');
+    const out = await run;
+    assert.equal(out.ok, false, JSON.stringify(out));
+    assert.equal(out.errorCode, 'TAB_CHANGED_DURING_FOLLOW');
+    assert.equal(out.retryable, true);
+    assert.deepEqual(out.saved, []);
+    assert.equal(out.follow.completion, 'none');
+    assert.equal(end.completion, 'none');
+    assert.equal(x.seen.includes('agent.apply'), false);
+    assert.deepEqual(await readFile(join(root, 'x.hwp')), bytes);
+    assert.equal(await head(root), before);
+  });
 });
 
 test('(F11) followEnd queued during claim is sent just after hello', () => {

@@ -34,7 +34,7 @@ function setShellState(state) {
   document.body.dataset.shellState = state.kind;
   document.body.dataset.noDocument = state.kind === 'open' ? '' : 'true';
   if (state.kind === 'open') delete document.body.dataset.noDocument;
-  if (studio) studio.element.inert = state.kind !== 'open';
+  if (studio) studio.element.inert = state.kind !== 'open' || state.followPending === true;
   shellMessage.textContent = state.reason === 'STUDIO_FAILED' ? '편집기를 시작하지 못했습니다'
     : state.kind === 'opening' ? '문서를 여는 중…'
     : state.kind === 'error' ? `${nameOf(state.attemptedId)} 문서를 열지 못했습니다`
@@ -189,8 +189,9 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
       },
     });
     current = next;
+    if (agent && !restore) setSaveLocked(true);
     syncCopyPathButton();
-    setShellState({ kind: 'open' });
+    setShellState({ kind: 'open', followPending: agent && !restore });
     filename.textContent = nameOf(id); filename.title = id;
     saveButton.disabled = agentLocked;
     for (const button of document.querySelectorAll('#docs button[data-id], #external-docs button[data-id]')) button.setAttribute('aria-current', String(button.dataset.id === id));

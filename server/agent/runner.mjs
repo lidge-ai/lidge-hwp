@@ -110,7 +110,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
     }
   }
   const waitMs = () => Math.min(config.followMaxMs ?? FOLLOW_MAX_MS, left(FOLLOW_CODE_RESERVE_MS));
-  async function prepareAndVerify(lease, disk) {
+  async function prepareAndVerify(lease, disk, expectedReadSha = null) {
     if (tabs.isIsolated?.(lease)) throw new Error('LEASE_ISOLATED');
     const prepareMs = Math.min(PREPARE_MAX_MS, left(PREPARE_CODE_RESERVE_MS));
     if (prepareMs < PREPARE_MIN_MS) throw new Error('NO_TIME_FOR_PREPARE');
@@ -120,6 +120,14 @@ export async function runAgent({ code, timeoutMs = 30000 },
     catch (error) { prepareToken = error.requestId ?? null; throw error; }
     prepareToken = prepared.requestId;
     if (prepared.state?.format !== disk.format) throw new Error('FORMAT_MISMATCH');
+    if (expectedReadSha && (prepared.state.dirty || prepared.exportSha256 !== expectedReadSha
+      || sha(prepared.bytes) !== expectedReadSha)) {
+      throw Object.assign(new Error('TAB_CHANGED_DURING_FOLLOW'), {
+        code: 'TAB_CHANGED_DURING_FOLLOW', retryable: true,
+        hashes: { snapshotSha256: prepared.state?.documentSha256 ?? null,
+          exportSha256: prepared.exportSha256, tabDiskSha256: prepared.diskSha256 },
+      });
+    }
     if (prepared.contentLoss.count > 0 && prepared.state.dirty) throw new Error('DIRTY_TAB_KORDOC_UNSAFE');
     if (prepared.diskSha256 !== disk.sha256) throw new Error('ETAG_MISMATCH');
     if (sha(prepared.bytes) !== prepared.exportSha256) {
@@ -142,7 +150,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
       if (!lease) return;
       const currentDisk = await store.read(state.id);
       if (currentDisk.sha256 !== disk.sha256) throw new Error('ETAG_MISMATCH');
-      const prepared = await prepareAndVerify(lease, currentDisk);
+      const prepared = await prepareAndVerify(lease, currentDisk, state.source.sha256);
       const source = { bytes: prepared.contentLoss.count > 0 ? disk.bytes : prepared.bytes,
         sha256: disk.sha256, format: disk.format };
       const doc = await openDoc(source.bytes);

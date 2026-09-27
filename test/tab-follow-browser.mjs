@@ -36,9 +36,21 @@ await withBrowser({ files: ['x.hwp', 'y.hwp', 'z.hwp'], agent: true,
   assert.equal(await head(docs), initial);
   console.log('PASS B1 read-only open keeps y tab');
 
+  await cdp.eval(`window.__heldPrepares = [];
+    window.__originalFollowListener = EventSource.prototype.addEventListener;
+    EventSource.prototype.addEventListener = function(type, listener, options) {
+      if (type === 'agent.prepare') return window.__originalFollowListener.call(this, type, event => {
+        window.__heldPrepares.push(() => listener.call(this, event));
+      }, options);
+      return window.__originalFollowListener.call(this, type, listener, options);
+    };`);
   const unsaved = runCode(socketPath,
     "const h=await hwp.open('x.hwp'); await hwp.format(h,{paragraph:0,start:0,end:0},{bold:true}); await hwp.save(h)");
-  await until(async () => (await shell()).id === 'x.hwp');
+  await until(() => cdp.eval(`return document.querySelector('#filename').title === 'x.hwp' && window.__heldPrepares.length === 1`));
+  assert.equal(await cdp.eval(`return document.querySelector('#studio iframe').inert`), true);
+  assert.equal(await cdp.eval(`return document.querySelector('#save').disabled`), true);
+  console.log('PASS B2a followed tab stays inert until prepare');
+  await cdp.eval(`window.__heldPrepares.shift()(); EventSource.prototype.addEventListener = window.__originalFollowListener`);
   const unsavedResult = await unsaved;
   assert.equal(unsavedResult.ok, false, JSON.stringify(unsavedResult));
   assert.equal(unsavedResult.error, 'save requires an edit');
