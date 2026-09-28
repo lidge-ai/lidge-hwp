@@ -162,6 +162,7 @@ export async function createServer({ docsRoot = DOCS_ROOT, buildDir = BUILD_DIR,
         json(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'METHOD_NOT_ALLOWED' } }); return;
       }
       if (url.pathname === '/') return staticFile(res, join(ROOT, 'web'), 'index.html');
+      if (url.pathname === '/doc-name.mjs') return staticFile(res, join(ROOT, 'lib'), 'doc-name.mjs');
       // 로컬 편집기는 Studio의 PWA 오프라인 캐시를 쓰지 않는다. 캐시된 옛 Studio가 새 lidge RPC를 모르는 채로
       // 떠서 에이전트 편집이 'Unknown method'로 실패한 적이 있다(wp3 B). sw.js는 스스로 해제하고 캐시를 비운 뒤
       // 열린 창을 다시 불러오는 스크립트로, registerSW.js는 빈 스크립트로 바꿔 준다.

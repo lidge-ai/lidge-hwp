@@ -151,7 +151,7 @@ async function main() {
     assert.deepEqual(await cdp.eval(`return window.__writes;`), []);
     console.log('PASS inline rename input ignores shortcut');
 
-    await cdp.eval(`const input = document.querySelector('.rename-input'); input.value = 'renamed.hwp';
+    await cdp.eval(`const input = document.querySelector('.rename-input'); input.value = 'renamed';
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));`);
     await until(() => cdp.eval(`return document.querySelector('#filename').title === 'renamed.hwp'
       && !document.querySelector('#copy-path').disabled;`));

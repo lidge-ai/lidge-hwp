@@ -1,6 +1,7 @@
 import { persistDocument, indexEntry, restoreIndex } from '../lib/persist.mjs';
 import { commitFile } from '../lib/git.mjs';
 import { matchesFormat, validateSegment } from '../lib/docstore.mjs';
+import { normalizeNewDocName } from '../lib/doc-name.mjs';
 import { createBlankHwpBytes } from '../lib/rhwp-node.mjs';
 import { AGENT_PUT_HOLD_MS } from '../lib/config.mjs';
 import { verifyAgentBytes } from '../lib/signature.mjs';
@@ -24,7 +25,28 @@ async function body(req, maxBytes) {
 
 export function createDocsApi({ store, tabs, pickFolder }) {
   let pickInFlight = false;
+  const requests = new Map();
+  const REQUEST_TTL_MS = 10 * 60 * 1000;
+  const REQUEST_LIMIT = 64;
+  function remembered(id) {
+    const entry = requests.get(id);
+    if (!entry) return null;
+    if (Date.now() - entry.at > REQUEST_TTL_MS) { requests.delete(id); return null; }
+    requests.delete(id);
+    requests.set(id, entry);
+    return entry;
+  }
   async function handle(req, res, pathname) {
+    if (pathname.startsWith('/api/docs/requests/')) {
+      if (req.method !== 'GET') { error(res, 405, 'METHOD_NOT_ALLOWED'); return true; }
+      const requestId = pathname.slice('/api/docs/requests/'.length);
+      if (!/^[0-9a-f-]{36}$/i.test(requestId)) { error(res, 400, 'INVALID_REQUEST_ID'); return true; }
+      const entry = remembered(requestId);
+      if (!entry) error(res, 404, 'REQUEST_NOT_FOUND');
+      else if (entry.result) send(res, 200, entry.result);
+      else send(res, 202, { pending: true });
+      return true;
+    }
     if (pathname === '/api/docs' && req.method === 'POST') {
       try {
         if (req.headers['content-type']?.split(';')[0] !== 'application/json') {
@@ -39,20 +61,37 @@ export function createDocsApi({ store, tabs, pickFolder }) {
             || (group.kind === 'external' && typeof group.key !== 'string')) {
           error(res, 400, 'INVALID_GROUP'); return true;
         }
-        const requested = data.name === undefined ? null : validateSegment(data.name);
-        if (requested && !requested.toLowerCase().endsWith('.hwp')) {
-          error(res, 400, 'INVALID_FORMAT'); return true;
+        const requested = data.name === undefined ? null : validateSegment(normalizeNewDocName(data.name));
+        const requestId = data.requestId;
+        if (requestId !== undefined && (typeof requestId !== 'string' || !/^[0-9a-f-]{36}$/i.test(requestId))) {
+          error(res, 400, 'INVALID_REQUEST_ID'); return true;
         }
-        const bytes = await createBlankHwpBytes();
-        for (let n = 1; n <= 10000; n += 1) {
-          const name = requested ?? (n === 1 ? '새 문서.hwp' : `새 문서 ${n}.hwp`);
-          try { send(res, 201, await store.createDocument(group, name, bytes)); return true; }
-          catch (cause) {
-            if ((cause.code === 'DOC_EXISTS' || cause.code === 'DOCUMENT_LOCKED') && !requested) continue;
-            throw cause;
+        const fingerprint = JSON.stringify({ group, requested });
+        const prior = requestId && remembered(requestId);
+        if (prior) {
+          if (prior.fingerprint !== fingerprint) { error(res, 409, 'REQUEST_ID_CONFLICT'); return true; }
+          send(res, 201, await prior.promise); return true;
+        }
+        const create = async () => {
+          const bytes = await createBlankHwpBytes();
+          for (let n = 1; n <= 10000; n += 1) {
+            const name = requested ?? (n === 1 ? '새 문서.hwp' : `새 문서 ${n}.hwp`);
+            try { return await store.createDocument(group, name, bytes); }
+            catch (cause) {
+              if ((cause.code === 'DOC_EXISTS' || cause.code === 'DOCUMENT_LOCKED') && !requested) continue;
+              throw cause;
+            }
           }
+          throw Object.assign(new Error('NAME_EXHAUSTED'), { status: 409, code: 'NAME_EXHAUSTED' });
+        };
+        const promise = create();
+        if (requestId) {
+          const entry = { at: Date.now(), fingerprint, promise, result: null };
+          requests.set(requestId, entry);
+          while (requests.size > REQUEST_LIMIT) requests.delete(requests.keys().next().value);
+          promise.then(result => { entry.result = result; }, () => { requests.delete(requestId); });
         }
-        error(res, 409, 'NAME_EXHAUSTED');
+        send(res, 201, await promise);
       } catch (cause) {
         const status = cause instanceof SyntaxError ? 400 : cause.status || 500;
         const code = cause instanceof SyntaxError ? 'INVALID_JSON' : cause.code || 'CREATE_FAILED';

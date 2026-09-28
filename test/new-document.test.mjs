@@ -9,8 +9,65 @@ import { once } from 'node:events';
 import { createServer } from '../server/index.mjs';
 import { openDocument } from '../lib/rhwp-node.mjs';
 import { assertOriginMatrix } from './helpers/origin-matrix.mjs';
+import { normalizeNewDocName } from '../lib/doc-name.mjs';
 
 const git = promisify(execFile);
+
+test('new names trim, normalize and keep only lowercase HWP extension', () => {
+  assert.equal(normalizeNewDocName('  보고서  '), '보고서.hwp');
+  assert.equal(normalizeNewDocName('보고서.HWP'), '보고서.hwp');
+  assert.equal(normalizeNewDocName('보고서'), '보고서.hwp');
+  for (const name of ['', '   ', '보고서.hwpx', '보고서.txt']) assert.throws(() => normalizeNewDocName(name));
+});
+
+test('request status recovers one creation and never creates on unknown lookup', async t => {
+  const { root, base } = await setup(t);
+  const requestId = '11111111-1111-4111-8111-111111111111';
+  const unknown = await fetch(`${base}/api/docs/requests/22222222-2222-4222-8222-222222222222`);
+  assert.equal(unknown.status, 404);
+  assert.deepEqual((await readdir(root)).filter(name => name.endsWith('.hwp')), []);
+  const payload = { group: { kind: 'default' }, requestId, name: '  보고서.HWP  ' };
+  const post = () => fetch(`${base}/api/docs`, { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify(payload) });
+  const first = await post();
+  assert.equal(first.status, 201);
+  const created = await first.json();
+  assert.equal(created.id, '보고서.hwp');
+  const status = await fetch(`${base}/api/docs/requests/${requestId}`);
+  assert.equal(status.status, 200);
+  assert.deepEqual(await status.json(), created);
+  const repeat = await post();
+  assert.equal(repeat.status, 201);
+  assert.deepEqual(await repeat.json(), created);
+  assert.deepEqual((await readdir(root)).filter(name => name.endsWith('.hwp')), ['보고서.hwp']);
+});
+
+test('in-flight request reports pending and duplicate POST shares its result', async t => {
+  const { root, base, server } = await setup(t);
+  const original = server.store.createDocument.bind(server.store);
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  server.store.createDocument = async (...args) => { await gate; return original(...args); };
+  const requestId = '33333333-3333-4333-8333-333333333333';
+  const post = () => fetch(`${base}/api/docs`, { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: base },
+    body: JSON.stringify({ group: { kind: 'default' }, requestId }),
+  });
+  const first = post();
+  let pending;
+  for (let i = 0; i < 30; i += 1) {
+    pending = await fetch(`${base}/api/docs/requests/${requestId}`);
+    if (pending.status === 202) break;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(pending.status, 202);
+  const second = post();
+  release();
+  const responses = await Promise.all([first, second]);
+  assert.deepEqual(responses.map(response => response.status), [201, 201]);
+  assert.deepEqual(await responses[0].json(), await responses[1].json());
+  assert.deepEqual((await readdir(root)).filter(name => name.endsWith('.hwp')), ['새 문서.hwp']);
+});
 
 async function setup(t) {
   const scratch = await mkdtemp(join(tmpdir(), 'lidge-new-'));
