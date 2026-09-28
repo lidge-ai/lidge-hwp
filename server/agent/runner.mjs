@@ -10,6 +10,9 @@ import { format, paraFormat, getFormat, styles, applyStyle } from '../../lib/for
 import { selectAll } from '../../lib/scope.mjs';
 import { STRUCTURE } from '../../lib/structure.mjs';
 import { insertTextHelper, setCellHelper } from '../../lib/text-helpers.mjs';
+import { nestedSetCell, nestedInsertText, nestedReplaceText, checkboxes, setCheckboxHelper, legacyNestedCheckbox, nestedAddressOf } from '../../lib/nested.mjs';
+import { nestedTables, nestedCellsView } from '../../lib/cells.mjs';
+import { execFile } from 'node:child_process';
 import { wireError } from './wire-error.mjs';
 import { renderDocument, cliPageCountOf } from '../../lib/render.mjs';
 import { createPageView } from '../../lib/page-view.mjs';
@@ -18,6 +21,8 @@ const MUTATE_HELPERS = { format, paraFormat, applyStyle, ...STRUCTURE };
 import { contentSignature } from '../../lib/signature.mjs';
 // 탭이 agent.release에 답할 한도. 채널은 진행 중인 apply가 확정될 때까지 release를 미루므로 apply 뒤처리 시간을 덮는다.
 const RELEASE_DEADLINE_MS = 45000;
+// snapshot inline: 한 hwp_exec 결과에 붙이는 쪽 이미지 수와 기본 긴 변(px). 모델이 읽기 충분하고 결과가 커지지 않는 값이다.
+export const MAX_INLINE_IMAGES = 4, INLINE_MAX_PX = 1400;
 // wp5 시간 예산: 따라가기·여는 중 탭 기다림·prepare·에이전트 코드가 한 마감(start + timeoutMs)을 나눠 쓴다(아래 "시간 예산").
 // 기다림은 마감에서 5초(prepare와 코드 몫)를 남긴 만큼, prepare는 2초(코드 몫)를 남긴 만큼만 쓴다.
 const FOLLOW_MAX_MS = 15000, FOLLOW_CODE_RESERVE_MS = 5000, FOLLOW_MIN_MS = 2000;
@@ -173,6 +178,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
   }
   const active = new Set();
   const saved = [];
+  const images = []; // snapshot inline PNG 경로. 결과 images로 나가고 mcp/server.mjs가 이미지 블록으로 붙인다
   // host 호출은 한 invocation 안에서 하나씩 순서대로 실행한다. 겹친 open이 서로의 state·lockToken을
   // 덮어쓰지 못하게 하고, timeout 때는 closed=true 뒤 대기 중인 호출이 시작 시점에 거절된다.
   let hostChain = Promise.resolve();
@@ -243,17 +249,40 @@ export async function runAgent({ code, timeoutMs = 30000 },
     }
     if (name === 'getFormat') return getFormat(state.doc, args[1]);
     if (name === 'styles') return styles(state.doc);
+    if (name === 'nestedTables') return nestedTables(state.doc).map(({ nested, rows, cols, parent }) => ({ nested, rows, cols, parent }));
+    if (name === 'checkboxes') return checkboxes(state.doc, args[1] ?? {});
+    if (name === 'cells' && args[1] && typeof args[1] === 'object' && args[1].nested !== undefined) return nestedCellsView(state.doc, args[1].nested);
     if (name === 'snapshot' || name === 'exportPdf') {
       // 읽기 전용 렌더. 이번 호출에서 편집했으면 편집 결과를, 아니면 연 바이트(탭이 있으면 탭의 현재 내용)를 그린다.
+      // inline(snapshot): PNG를 MCP 결과에 이미지로 붙인다(mcp/server.mjs가 파일을 읽는다, 한 호출 최대 MAX_INLINE_IMAGES장).
+      // open(exportPdf, macOS): 만든 PDF를 기본 PDF 앱(미리보기)으로 연다.
+      const raw = args[1] ?? {};
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw Object.assign(new Error('RENDER_ARGS_INVALID: options must be an object'), { code: 'RENDER_ARGS_INVALID' });
+      const { inline = false, open: openAfter = false, ...options } = raw;
+      if (typeof inline !== 'boolean' || typeof openAfter !== 'boolean') throw Object.assign(new Error('RENDER_ARGS_INVALID: inline and open are booleans'), { code: 'RENDER_ARGS_INVALID' });
+      if (inline && name !== 'snapshot') throw Object.assign(new Error('RENDER_ARGS_INVALID: inline is a snapshot option'), { code: 'RENDER_ARGS_INVALID' });
+      if (inline && options.png === false) throw Object.assign(new Error('RENDER_ARGS_INVALID: inline needs png'), { code: 'RENDER_ARGS_INVALID' });
+      // inline은 쪽을 꼭 고른다(생략하면 모든 쪽을 그리므로 한도를 넘는다).
+      if (inline && (!Array.isArray(options.pages) || images.length + options.pages.length > MAX_INLINE_IMAGES))
+        throw Object.assign(new Error(`RENDER_ARGS_INVALID: inline needs pages:[...] and shows at most ${MAX_INLINE_IMAGES} pages per hwp_exec call (${images.length} already attached)`), { code: 'RENDER_ARGS_INVALID' });
+      if (openAfter && process.platform !== 'darwin') throw Object.assign(new Error('OPEN_UNSUPPORTED: open needs macOS'), { code: 'OPEN_UNSUPPORTED' });
+      const renderOptions = name === 'snapshot' ? { ...(inline && options.maxPx === undefined ? { maxPx: INLINE_MAX_PX } : {}), ...options }
+        : Object.keys(options).length ? options : undefined;
       const { bytes, cliPageCount } = await state.pages.current();
       const origin = state.batch.ops.length ? 'edited' : state.prepared && state.prepared.contentLoss.count === 0 ? 'tab' : 'disk';
       const out = await renderDocument({ kind: name === 'snapshot' ? 'snapshot' : 'pdf', bytes, format: state.source.format,
-        docId: exportPath(state.id), options: args[1], exportsRoot: config.exportsRoot ?? EXPORTS_ROOT,
+        docId: exportPath(state.id), options: renderOptions, exportsRoot: config.exportsRoot ?? EXPORTS_ROOT,
         docsRoots: exportRoots(),
         rhwpBin, deadline });
       if (out.pageCount !== cliPageCount) console.warn('[page-view] CLI dump-pages/render mismatch',
         { docId: state.id, api: cliPageCount, snapshot: out.pageCount });
+      if (inline) for (const p of out.pages) if (p.png) images.push({ page: p.page, path: `${out.dir}/${p.png}` });
+      let openError = null;
+      if (openAfter) openError = await new Promise(resolve => execFile(config.openBin ?? '/usr/bin/open', [out.path], { timeout: 10000 },
+        error => resolve(error ? String(error.message).split('\n')[0].slice(0, 200) : null)));
       return { docId: state.id, origin, ...out,
+        ...(inline ? { inline: out.pages.filter(p => p.png).map(p => p.page) } : {}),
+        ...(openAfter ? (openError ? { opened: false, openError } : { opened: true }) : {}),
         ...(out.pageCount !== cliPageCount ? { pageCountMismatch: { api: cliPageCount, snapshot: out.pageCount } } : {}) };
     }
     if (name === 'api') {
@@ -271,15 +300,34 @@ export async function runAgent({ code, timeoutMs = 30000 },
       // splitLines(#28)·format(#30) 옵션을 기존 op로 풀어 쓴다(lib/text-helpers.mjs). 옵션이 없으면 applyOp와 같다.
       if (state.save) throw new Error('mutation after save');
       await followBeforeMutation();
+      if (name === 'setCell' && args[1]?.nested !== undefined) return nestedSetCell(state.doc, state.batch, args[1]);
       return (name === 'setCell' ? setCellHelper : insertTextHelper)(state.doc, state.batch, args[1]);
     }
     if (['insertTextInCell','replaceText','setCheckbox'].includes(name)) {
       if (state.save) throw new Error('mutation after save');
       await followBeforeMutation();
+      const a = args[1];
+      if (name === 'insertTextInCell' && a?.nested !== undefined) return nestedInsertText(state.doc, state.batch, a);
+      if (name === 'replaceText' && a?.scope?.nested !== undefined) return nestedReplaceText(state.doc, state.batch, a);
+      if (name === 'setCheckbox') {
+        const legacy = a && typeof a === 'object' && Object.keys(a).length === 1 && Object.hasOwn(a, 'occurrence');
+        if (!legacy) return setCheckboxHelper(state.doc, state.batch, a);
+        const h = Number.isInteger(a.occurrence) && a.occurrence >= 0 ? JSON.parse(state.doc.searchAllText('□', true, true))[a.occurrence] : null;
+        if (h?.cellPath?.length === 2 && h.equationControl === undefined) return legacyNestedCheckbox(state.doc, state.batch, h, a.occurrence);
+      }
       return applyOp(state.doc, state.batch, name, args[1]);
     }
     if (name === 'info' || name === 'text') return state.pages.read(name, [args[1]]);
-    return readView(state.doc, name, args[1]);
+    const view = readView(state.doc, name, args[1]);
+    if (name === 'find' && Array.isArray(view)) {
+      // 칸 안 표(한 겹) 결과에 {nested,row,col,paragraph} 주소를 붙인다(hwp.setCell·replaceText·setCheckbox에 그대로 쓴다).
+      const tables = nestedTables(state.doc);
+      for (const h of view) if (h?.cellPath?.length === 2) {
+        const at = nestedAddressOf(state.doc, h.sec, h.para, h.cellPath, tables);
+        if (at) h.nested = at;
+      }
+    }
+    return view;
   };
   let result = null, releasedTab = null;
   try {
@@ -378,6 +426,7 @@ export async function runAgent({ code, timeoutMs = 30000 },
     // 결과를 돌려주기 전에 탭 해제를 끝낸다. 커밋은 됐는데 탭이 옛 문서이거나 해제가 확인되지 않으면 알린다.
     const tab = await releaseTab();
     result = { ok: true, result: out.result ?? null, logs: out.logs ?? [],
+      ...(images.length ? { images } : {}),
       elapsedMs: Date.now() - start, saved,
       ...(saved.length && (tab.reloadRequired || !tab.confirmed) ? { reloadRequired: true } : {}) };
     }

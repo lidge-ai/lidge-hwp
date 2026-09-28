@@ -108,6 +108,26 @@ return { edited: true };
 머리말·꼬리말·각주와 두 겹 이상 중첩 표는 제외된다. 중첩 칸의 문단 서식·스타일은
 지원하지 않아 `skipped`로 보고한다.
 
+### 칸 안의 표와 체크박스
+
+신청서는 동의서·팀원 표를 큰 칸 하나 안에 통째로 넣는 경우가 많다. `hwp.cells(h,{table})`에 제목만 보이면
+`hwp.nestedTables(h)`로 칸 안 표(한 겹)를 찾고 `{nested,row,col}`로 칸을 가리킨다.
+
+```js
+const h = await hwp.open('ku/참가신청서.hwp');
+const t = await hwp.nestedTables(h);                 // [{nested:0, rows:7, cols:4, parent:{table:7,row:0,col:0}}]
+await hwp.setCell(h, { nested: 0, row: 4, col: 1, text: '홍길동' });
+await hwp.setCheckbox(h, { label: '동의함', scope: { nested: 0, row: 4 }, exclusive: true });
+await hwp.snapshot(h, { pages: [7], inline: true }); // 저장 전 모습을 결과 이미지로 확인
+await hwp.save(h);
+```
+
+`hwp.checkboxes(h)`는 □(빈 칸)와 ■ ☑ ▣ ☒(체크)를 뒤 글자(label)와 위치와 함께 돌려준다. ■는 같은 문단에
+다른 체크박스가 있을 때만 체크박스로 보고 나머지는 글머리표로 둔다. `hwp.setCheckbox`는 label과 범위로 칸 하나를
+고르며, 체크 표시는 그 문단에서 쓰던 표시를 따른다(`mark`로 지정 가능). `exclusive:true`는 같은 문단의 다른
+체크를 □로 되돌린다. `hwp.insertTextInCell`, `hwp.replaceText`의 `scope:{nested,...}`, `hwp.format`의 범위도
+중첩 칸을 받는다. 두 겹 이상 중첩된 표는 다루지 않는다.
+
 열린 문서에는 편집기에서도 같은 변경을 재생한다. 다른 문서로 전환할 때 미저장 편집이
 있으면 자동 전환을 거절한다. 저장 바이트가 기대한 내용과 다르면
 `AGENT_VERIFY_MISMATCH`로 거절한다. `kordoc` 보조 저장은 표 칸 쓰기만 지원한다.
@@ -127,6 +147,8 @@ return { dir: s.dir, pages: s.pages.length, pdf: p.path };
 
 `snapshot(h, { pages, png, pdf, maxPx })`에서 `pages`는 0부터 센 쪽 번호 배열이다(생략하면 전체, 한 번에 200쪽까지).
 PNG는 macOS `sips`로 만들고 긴 변 `maxPx`(기본 1600)에 맞춘다. 결과는 기본 문서의 경우 `~/.lidge-hwp/exports/<문서 ID>/<시각>-<해시>/`, 외부 문서의 경우 `~/.lidge-hwp/exports/external/<UUID>/<상대경로>/<시각>-<해시>/`에 남는다. 출력 위치는 등록된 어느 문서 루트 안에도 둘 수 없다. 응답에는 경로만 담긴다. 같은 호출에서 저장 전에 고친 내용도 그대로 그린다(`origin: 'edited'`).
+`pages`와 함께 `inline: true`를 주면 PNG를 MCP 결과에 이미지로 붙여 에이전트가 파일을 따로 열지 않고 쪽을 본다(한 호출 4쪽까지,
+`maxPx` 기본 1400). `hwp.exportPdf(h, { open: true })`는 만든 PDF를 macOS 미리보기로 연다.
 쪽마다 0.3초 정도 걸리므로 긴 문서는 `timeoutMs`를 늘린다. 쪽 나눔은 CLI 조판을 따르므로 편집기와 조금 다를 수 있다.
 
 ### Aside

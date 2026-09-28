@@ -5,6 +5,7 @@ export const LIDGE_MUTATE_METHODS: Readonly<Record<string, number>> = Object.fre
   applyStyle: 3, applyCellStyle: 6, findOrCreateFontId: 1,
   insertText: 4, insertTextInCell: 7, replaceText: 5, replaceAll: 3, deleteText: 4, deleteTextInCell: 7,
   deleteRange: 5, deleteRangeInCell: 8, insertParagraph: 2, deleteParagraph: 2, splitParagraph: 3,
+  insertTextInCellByPath: 5, deleteTextInCellByPath: 5, splitParagraphInCellByPath: 4, mergeParagraphInCellByPath: 3,
   mergeParagraph: 2, splitParagraphInCell: 6, mergeParagraphInCell: 5, reflowParagraph: 2,
   createTable: 5, insertTableRow: 5, insertTableColumn: 5, deleteTableRow: 4, deleteTableColumn: 4,
   mergeTableCells: 7, splitTableCell: 5, setTableProperties: 4,

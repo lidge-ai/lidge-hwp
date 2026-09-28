@@ -2,7 +2,8 @@ import net from 'node:net';
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { AGENT_SOCK } from '../lib/config.mjs';
-import { TOOL_SPEC as tool } from './tool.mjs';
+import { TOOL_SPEC as tool, SERVER_INSTRUCTIONS } from './tool.mjs';
+import { imageBlocks } from './images.mjs';
 function execute(args, id = randomUUID()) {
   return new Promise((resolve, reject) => {
     const client = net.connect(AGENT_SOCK); let data = '';
@@ -36,17 +37,24 @@ async function callTool(args) {
     advice: 'do not retry; check with hwp.cells/hwp.docs after a while' };
 }
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+// hwp.snapshot(h,{inline:true})가 남긴 쪽 PNG는 텍스트 결과 뒤에 MCP 이미지 블록으로 붙는다(mcp/images.mjs).
+async function toolResult(out) {
+  const { images, ...rest } = out ?? {};
+  const { blocks, skipped } = await imageBlocks(images);
+  const body = skipped.length ? { ...rest, inlineSkipped: skipped } : rest;
+  return { content: [{ type: 'text', text: JSON.stringify(body) }, ...blocks], isError: !out?.ok };
+}
 for await (const line of rl) {
   let request;
   try {
     request = JSON.parse(line);
     if (!('id' in request)) continue;
     let result;
-    if (request.method === 'initialize') result = { protocolVersion: request.params?.protocolVersion ?? '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'lidge-hwp', version: '0.1.0' } };
+    if (request.method === 'initialize') result = { protocolVersion: request.params?.protocolVersion ?? '2025-03-26', capabilities: { tools: {} },
+      serverInfo: { name: 'lidge-hwp', version: '0.1.0' }, instructions: SERVER_INSTRUCTIONS };
     else if (request.method === 'tools/list') result = { tools: [tool] };
     else if (request.method === 'tools/call' && request.params?.name === 'hwp_exec') {
-      const out = await callTool(request.params.arguments ?? {});
-      result = { content: [{ type: 'text', text: JSON.stringify(out) }], isError: !out.ok };
+      result = await toolResult(await callTool(request.params.arguments ?? {}));
     } else throw Object.assign(new Error('method not found'), { rpcCode: -32601 });
     process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\n');
   } catch (e) {
