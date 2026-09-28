@@ -4232,6 +4232,15 @@ fn reflow_line_segs_impl(
 /// 줄 전진량은 로드 경로(document.rs 의 vpos 체인)와 동일하게 TAC 호스트
 /// 줄(lh>th)을 th 기준으로 센다 — lh 기준이면 인라인 개체 호스트의 end 가 저장
 /// 후속 first 를 넘어서 가짜 리셋을 만든다.
+pub(crate) fn boundary_gap(prev: &Paragraph, curr: &Paragraph, styles: &ResolvedStyleSet, dpi: f64, is_hwp3_variant: bool) -> i32 {
+    let spacing_after = styles.para_styles.get(prev.para_shape_id as usize)
+        .map(|style| style.spacing_after).unwrap_or(0.0);
+    let spacing_before = styles.para_styles.get(curr.para_shape_id as usize)
+        .map(|style| style.spacing_before).unwrap_or(0.0);
+    let spacing_before = crate::renderer::hwp3_variant_flow_spacing_before(spacing_before, is_hwp3_variant);
+    px_to_hwpunit(spacing_after + spacing_before, dpi)
+}
+
 pub(crate) fn recalculate_section_vpos(
     paragraphs: &mut [Paragraph],
     start_para: usize,
@@ -4247,21 +4256,6 @@ pub(crate) fn recalculate_section_vpos(
 
     // 문단 경계 gap (HWPUNIT) = 앞 문단 spacing_after + 뒤 문단 spacing_before.
     // recalculate_cell_paragraph_vpos 의 boundary_gaps 와 동일 산식.
-    let boundary_gap = |prev: &Paragraph, curr: &Paragraph| -> i32 {
-        let spacing_after = styles
-            .para_styles
-            .get(prev.para_shape_id as usize)
-            .map(|style| style.spacing_after)
-            .unwrap_or(0.0);
-        let spacing_before = styles
-            .para_styles
-            .get(curr.para_shape_id as usize)
-            .map(|style| style.spacing_before)
-            .unwrap_or(0.0);
-        let spacing_before =
-            crate::renderer::hwp3_variant_flow_spacing_before(spacing_before, is_hwp3_variant);
-        px_to_hwpunit(spacing_after + spacing_before, dpi)
-    };
 
     // 줄 전진량 — 로드 경로와 동일한 TAC th-관례. saturating: 조작 파일의 극단
     // spacing/좌표로 i32 가 넘치지 않게 한다 (release wasm 은 overflow-check 가
@@ -4342,7 +4336,7 @@ pub(crate) fn recalculate_section_vpos(
         } else if para_modified || prev_modified {
             // 변조 인접 경계 — 이동 후 흐름에 스타일 여백 gap 으로 다시 잇는다.
             let gap = prev_idx
-                .map(|pp| boundary_gap(&paragraphs[pp], &paragraphs[pi]))
+                .map(|pp| boundary_gap(&paragraphs[pp], &paragraphs[pi], styles, dpi, is_hwp3_variant))
                 .unwrap_or(0);
             next_vpos.saturating_add(gap) - current_start
         } else {

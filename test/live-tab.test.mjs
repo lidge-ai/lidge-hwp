@@ -1001,3 +1001,60 @@ test('wp3 channel 8: stop and follow stay busy until release reply is confirmed'
   await channelWait(() => f.replies.length === 4);
   assert.equal(f.replies[3].header.ok, true);
 });
+// ── wp13: 새 helper 옵션(splitLines·format:'plain'·칸 scope·occurrence)이 기존 op 종류만 내고, 탭 재생으로 서명이 맞는다 ──
+// 합성 탭은 Studio와 같은 규칙으로 재생한다: call은 api-registry.ts의 replayCall(결과 해시 확인), replaceText는 기록된 좌표,
+// 나머지 op는 lib/ops.mjs applyOp(탭 agent-ops.ts와 같은 의미).
+import { buildDoc, cellParas as wp13CellParas, cellChar as wp13CellChar, bodyParas as wp13BodyParas } from './helpers/wp13-docs.mjs';
+async function replayLikeTab(bytes, batch) {
+  const { replayCall } = await import('../rhwp/rhwp-studio/src/lidge/api-registry.ts');
+  const doc = await openDocument(bytes);
+  try {
+    for (const op of batch.ops) {
+      if (op.kind === 'call') replayCall(doc, op, s => sha(s));
+      else if (op.kind === 'replaceText') {
+        const a = op.resolved;
+        assert.equal(doc.getTextRange(a.section, a.para, a.offset, a.length), op.args.find);
+        doc.replaceText(a.section, a.para, a.offset, a.length, op.args.replace);
+      } else applyOp(doc, newBatch({}), op.kind, op.args);
+    }
+    return Buffer.from(exportWithReport(doc, 'hwp').bytes);
+  } finally { doc.free(); }
+}
+test('wp13: splitLines·format plain·칸 scope·occurrence op가 기존 op 종류로 탭에서 재생되고 서버 서명 확인(verify=bytes)', async t => {
+  const bytes = await buildDoc({ body: ['foo foo'], table: { rows: 1, cols: 2 }, cells: { '0,0': '안내', '0,1': 'foo foo' }, gray: ['0,0'] });
+  const env = await seed(t, { id: 'a.hwp', bytes, agentConfig: { releaseDeadlineMs: 3000 } });
+  const lease = await claimLease(env.base, 'a.hwp');
+  const tab = await connectTab(t, env.base, lease);
+  const f = { ...env, id: 'a.hwp', bytes, format: 'hwp', lease, tab };
+  const code = "const h = await hwp.open('a.hwp');" +
+    " await hwp.setCell(h,{table:0,row:0,col:0,text:'첫째\\n\\n셋째',splitLines:true,format:'plain'});" +
+    " await hwp.replaceText(h,{find:'foo',replace:'bar',scope:{table:0,row:0,col:1},occurrence:1});" +
+    " await hwp.replaceText(h,{find:'foo',replace:'baz',occurrence:0});" +
+    " await hwp.insertText(h,{paragraph:0,text:'끝1\\n끝2',splitLines:true});" +
+    " await hwp.save(h); return 'ok'";
+  const response = runCode(f.socketPath, code);
+  const prepare = await tab.frame('agent.prepare');
+  await tab.reply(prepare.requestId, preparedReply(f), bytes);
+  const first = await Promise.race([tab.frame('agent.apply').then(apply => ({ apply })), response.then(out => ({ out }))]);
+  assert.ok(first.apply, JSON.stringify(first.out));
+  const { apply } = first;
+  assert.ok(apply.batch.ops.every(o => ['setCell', 'insertTextInCell', 'replaceText', 'insertText', 'call'].includes(o.kind)));
+  const put = await agentPut(f, apply, await replayLikeTab(bytes, apply.batch));
+  assert.equal(put.status, 200, await put.clone().text());
+  const saved = await put.json();
+  assert.equal(saved.verify, 'bytes');
+  assert.equal((await tab.reply(apply.requestId, { ok: true, diskSha256: saved.sha256, commit: saved.commit })).status, 204);
+  const release = await tab.frame('agent.release');
+  await tab.reply(release.requestId, { ok: true });
+  const out = await response;
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.saved[0].commit, await head(env.root));
+  const disk = await openDocument(await readFile(join(env.root, 'a.hwp')));
+  try {
+    assert.deepEqual(wp13CellParas(disk, 0, 0, 0), ['첫째', '', '셋째']);
+    assert.equal(wp13CellChar(disk, 0, 0, 0).textColor, '#000000');
+    assert.equal(wp13CellChar(disk, 0, 0, 0).italic, false);
+    assert.deepEqual(wp13CellParas(disk, 0, 0, 1), ['foo bar']);
+    assert.deepEqual(wp13BodyParas(disk).slice(0, 2), ['baz foo끝1', '끝2']);
+  } finally { disk.free(); }
+});

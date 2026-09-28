@@ -46,6 +46,21 @@ test('Node와 탭 목록·정규화가 같다', () => {
   assert.equal(tsCanonical(v), canonical(v));
   assert.equal(tsNormalize('{"ok":true,"a":1}'), normalizeResult('{"a":1,"ok":true}'));
 });
+test('T22-d reflowParagraph records and replays; getStoredFlowGaps is read-only', async () => {
+  const bytes = await readFile(new URL('../rhwp/saved/blank2010.hwp', import.meta.url));
+  const first = await openDocument(bytes), second = await openDocument(bytes);
+  try {
+    for (const doc of [first, second]) {
+      for (let p = 1; p < 5; p++) doc.insertParagraph(0, p);
+      for (let p = 0; p < 5; p++) doc.insertText(0, p, 0, 'A');
+    }
+    const batch = newBatch({});
+    assert.deepEqual(applyCall(first, batch, 'reflowParagraph', [0, 4]), { ok: true });
+    assert.equal(replayCall(second, batch.ops[0], sha), '{"ok":true}');
+    assert.deepEqual(readApi(first, 'getStoredFlowGaps', [0]), JSON.parse(first.getStoredFlowGaps(0)));
+    assert.throws(() => readApi(first, 'reflowParagraph', [0, 4]), code('API_METHOD_DENIED'));
+  } finally { first.free(); second.free(); }
+});
 test('replayCall(탭 재생): 반환값이 다르면 RESULT_MISMATCH, 목록 밖·함수 없음도 막는다', () => {
   const hash = s => sha(s);
   const op = { args: { method: 'applyCharFormat', args: [0, 0, 0, 1, '{"italic":true}'] }, resultSha256: sha(normalizeResult('{"ok":true}')) };
@@ -151,8 +166,34 @@ test('help(): HELPERS가 worker의 도우미 이름을 모두 설명하고 범�
   const src = (await readFile(new URL('../server/agent/worker.mjs', import.meta.url), 'utf8'));
   const names = [...src.match(/const names = \[([\s\S]*?)\];/)[1].matchAll(/'([A-Za-z]+)'/g)].map(m => m[1]);
   const described = HELPERS.helpers.join(' ');
-  for (const n of names) assert.match(described, new RegExp(`(^|[\\s|'])${n}\\(`), n);
+  for (const n of names) assert.match(described, new RegExp(`(^|[\\s|'])hwp\\.${n}\\(`), n); // #27: VM 전역은 hwp 하나뿐이다
   assert.match(HELPERS.notes.join(' '), /nested one level/);
   const help = apiHelp(HELPERS);
   assert.ok(help.mutate.length >= 30 && help.helpers.length === HELPERS.helpers.length);
+});
+
+test('wp13 #27 help·도구 설명의 도우미는 모두 hwp. 접두사이고, 새 옵션과 단위·오류 규칙을 적는다', async () => {
+  const { HELPERS } = await import('../lib/api-registry.mjs');
+  const { TOOL_SPEC } = await import('../mcp/tool.mjs');
+  for (const h of HELPERS.helpers) assert.ok(h.startsWith('hwp.'), h);
+  assert.ok(HELPERS.scopes.includes('hwp.selectAll()'), HELPERS.scopes.join());
+  const helperNames = 'docs|open|save|help|selectAll|info|text|paragraphs|tables|cells|find|getFormat|styles|snapshot|exportPdf|setCell|insertTextInCell|insertText|replaceText|replaceAll|setCheckbox|format|paraFormat|applyStyle|insertParagraph|deleteParagraph|splitParagraph|mergeParagraph|deleteText|deleteRange|createTable|insertRow|insertColumn|deleteRow|deleteColumn|mergeCells|splitCell';
+  const bare = new RegExp(`(?<![.\\w])(${helperNames})\\(`, 'g');
+  for (const text of [TOOL_SPEC.description, ...HELPERS.helpers, ...HELPERS.scopes, ...HELPERS.notes, HELPERS.charProps, HELPERS.paraProps])
+    assert.deepEqual(text.match(bare), null, text);
+  assert.ok(!/(?<![.\w])(splitParagraph|deleteText|replaceAll|createTable|insertRow|mergeCells)\b(?!\()/.test(TOOL_SPEC.description), 'bare helper names in the tool description');
+  assert.ok(TOOL_SPEC.description.length <= 1500, String(TOOL_SPEC.description.length));
+  const all = JSON.stringify(HELPERS);
+  for (const s of ['splitLines', "'plain'", "'inherit'", 'occurrence', 'scope', "unit:'pt'", 'from', 'limit', 'PLAIN_STYLE_UNAVAILABLE', 'code', 'details'])
+    assert.ok(all.includes(s), s);
+  assert.match(all, /spacingBefore.*1\/100 pt|1\/100 pt.*spacing/);
+  assert.match(all, /1\/200 pt/);
+});
+test('wp13 #28 직접 API 한 줄 인자 오류도 문자와 위치를 싣는다', () => {
+  assert.throws(() => validateApiCall('insertText', [0, 0, 0, 'a\tb']), e => {
+    assert.equal(e.code, 'API_ARGS_INVALID');
+    assert.match(e.message, /insertText arg 3 must be one-line string: U\+0009 at codePointIndex=1, utf16Index=1/);
+    assert.deepEqual(e.details, { arg: 'arg 3', codePoint: 'U+0009', codePointIndex: 1, utf16Index: 1 });
+    return true;
+  });
 });
