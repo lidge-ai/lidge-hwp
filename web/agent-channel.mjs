@@ -8,6 +8,9 @@ export function startAgentChannel({ editor, events, docId, lease, getDiskSha, se
   let applyDone = Promise.resolve(); // 진행 중인 agent.apply 처리기. release는 이것이 끝난 뒤에만 처리한다
   let releaseDone = Promise.resolve(); // 다음 prepare는 release 처리 뒤에만 시작한다
   let releasing = false;
+  // stopAgent가 끝나면 이 채널은 떠나는 중이다(이름 바꾸기·전환). 그 뒤 서버가 SSE를 닫아 onerror가 와도
+  // 다음 문서의 Save 잠금(셸 전역)을 걸지 않는다.
+  let stopped = false;
   const fileName = docId.split('/').at(-1);
   const FOLLOW_WHY = { DIRTY: '저장하지 않은 편집이 있어', SAVING: '저장 중이라', BUSY: '다른 작업 중이라', ISOLATED: '이 탭이 격리돼 있어' };
   const unlock = token => editor.lidge.request('lockInput', { on: false, reason: '', token });
@@ -283,6 +286,7 @@ export function startAgentChannel({ editor, events, docId, lease, getDiskSha, se
   });
   events.onerror = () => {
     events.close();
+    if (stopped) return;
     // 진행 중인 apply가 있으면(저장 확정 전) 표시만 하고 잠금을 유지한다. 되돌리기·저장 확정·해제·격리는 apply 처리기가 정한다.
     if (applyState && !applyState.saved) {
       disconnected = true;
@@ -300,6 +304,7 @@ export function startAgentChannel({ editor, events, docId, lease, getDiskSha, se
     if (isolated) throw Object.assign(new Error('LEASE_ISOLATED'), { code: 'LEASE_ISOLATED' });
     // 에이전트 작업이 끝나지 않았으면(prepare 뒤 release 전, 또는 apply 확정 전) 정리를 거부한다.
     if (active || releasing || (applyState && !applyState.saved)) throw Object.assign(new Error('AGENT_BUSY'), { code: 'AGENT_BUSY' });
+    stopped = true;
     setSaveLocked(false);
   };
 }

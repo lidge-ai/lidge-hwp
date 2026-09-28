@@ -1045,6 +1045,7 @@ function channelHarness(t, { applyError, unlockError, replyGate, canFollow = asy
   t.after(() => { globalThis.fetch = originalFetch; });
   const bytes = Uint8Array.of(1);
   const events = new EventTarget();
+  events.close = () => { events.closed = true; };
   const calls = [], replies = [], statuses = [], saveLocks = [];
   let locked = false;
   let inert = false;
@@ -1088,8 +1089,22 @@ function channelHarness(t, { applyError, unlockError, replyGate, canFollow = asy
     }, canFollow });
   const send = (type, id, payload) => sendChannelEvent(events, type, id, payload);
   const prepare = async () => { send('agent.prepare', 'p', { format: 'hwp' }); await channelWait(() => replies.length === 1); };
-  return { send, prepare, calls, replies, statuses, saveLocks, editor, stop };
+  return { send, prepare, calls, replies, statuses, saveLocks, editor, stop, events };
 }
+
+test('stopAgent then the server closing SSE does not lock Save for the next document (rename)', async t => {
+  const f = channelHarness(t);
+  await f.stop(); // 이름 바꾸기 요청 전 정리: 저장 잠금 해제
+  assert.deepEqual(f.saveLocks, [false]);
+  f.events.onerror(); // 서버가 옛 lease의 SSE를 닫는다 → 이 채널은 이미 떠나는 중
+  assert.deepEqual(f.saveLocks, [false]);
+  assert.equal(f.events.closed, true);
+});
+test('an unexpected SSE drop still locks Save', async t => {
+  const f = channelHarness(t);
+  f.events.onerror();
+  assert.deepEqual(f.saveLocks, [true]);
+});
 
 test('(P2) prepare pairs export bytes with state after caret stamp', async t => {
   const a = Uint8Array.of(1), b = Uint8Array.of(2);
