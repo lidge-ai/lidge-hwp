@@ -10,6 +10,7 @@ import { groupDocs, groupKeyOf, createGroupFor, matchDoc, renderProjects, readCo
 initSidebar();
 
 const docFilter = document.querySelector('#doc-filter');
+const studioHost = document.querySelector('#studio');
 const refreshButton = document.querySelector('#docs-refresh');
 const projectAdd = document.querySelector('#project-add');
 const folderAdd = document.querySelector('#folder-add');
@@ -34,7 +35,12 @@ function setShellState(state) {
   document.body.dataset.shellState = state.kind;
   document.body.dataset.noDocument = state.kind === 'open' ? '' : 'true';
   if (state.kind === 'open') delete document.body.dataset.noDocument;
-  if (studio) studio.element.inert = state.kind !== 'open' || state.followPending === true;
+  // 첫 화면은 index.html의 #studio inert로 막는다(스크립트 전 입력 차단). 편집기가 생기면 입력 차단은 iframe inert가 맡으므로
+  // 감싸는 #studio의 inert는 푼다. 남겨 두면 iframe inert를 풀어도 편집기가 계속 입력을 받지 못한다.
+  if (studio) {
+    studio.element.inert = state.kind !== 'open' || state.followPending === true;
+    studioHost.inert = false;
+  }
   shellMessage.textContent = state.reason === 'STUDIO_FAILED' ? '편집기를 시작하지 못했습니다'
     : state.kind === 'opening' ? '문서를 여는 중…'
     : state.kind === 'error' ? `${nameOf(state.attemptedId)} 문서를 열지 못했습니다`
