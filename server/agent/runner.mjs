@@ -262,8 +262,9 @@ export async function runAgent({ code, timeoutMs = 30000 },
       if (typeof inline !== 'boolean' || typeof openAfter !== 'boolean') throw Object.assign(new Error('RENDER_ARGS_INVALID: inline and open are booleans'), { code: 'RENDER_ARGS_INVALID' });
       if (inline && name !== 'snapshot') throw Object.assign(new Error('RENDER_ARGS_INVALID: inline is a snapshot option'), { code: 'RENDER_ARGS_INVALID' });
       if (inline && options.png === false) throw Object.assign(new Error('RENDER_ARGS_INVALID: inline needs png'), { code: 'RENDER_ARGS_INVALID' });
-      if (inline && images.length + (options.pages?.length ?? 1) > MAX_INLINE_IMAGES)
-        throw Object.assign(new Error(`RENDER_ARGS_INVALID: inline shows at most ${MAX_INLINE_IMAGES} pages per hwp_exec call; pass pages:[...]`), { code: 'RENDER_ARGS_INVALID' });
+      // inline은 쪽을 꼭 고른다(생략하면 모든 쪽을 그리므로 한도를 넘는다).
+      if (inline && (!Array.isArray(options.pages) || images.length + options.pages.length > MAX_INLINE_IMAGES))
+        throw Object.assign(new Error(`RENDER_ARGS_INVALID: inline needs pages:[...] and shows at most ${MAX_INLINE_IMAGES} pages per hwp_exec call (${images.length} already attached)`), { code: 'RENDER_ARGS_INVALID' });
       if (openAfter && process.platform !== 'darwin') throw Object.assign(new Error('OPEN_UNSUPPORTED: open needs macOS'), { code: 'OPEN_UNSUPPORTED' });
       const renderOptions = name === 'snapshot' ? { ...(inline && options.maxPx === undefined ? { maxPx: INLINE_MAX_PX } : {}), ...options }
         : Object.keys(options).length ? options : undefined;
@@ -276,9 +277,12 @@ export async function runAgent({ code, timeoutMs = 30000 },
       if (out.pageCount !== cliPageCount) console.warn('[page-view] CLI dump-pages/render mismatch',
         { docId: state.id, api: cliPageCount, snapshot: out.pageCount });
       if (inline) for (const p of out.pages) if (p.png) images.push({ page: p.page, path: `${out.dir}/${p.png}` });
-      if (openAfter) await new Promise(resolve => execFile(config.openBin ?? '/usr/bin/open', [out.path], () => resolve()));
+      let openError = null;
+      if (openAfter) openError = await new Promise(resolve => execFile(config.openBin ?? '/usr/bin/open', [out.path], { timeout: 10000 },
+        error => resolve(error ? String(error.message).split('\n')[0].slice(0, 200) : null)));
       return { docId: state.id, origin, ...out,
-        ...(inline ? { inline: out.pages.filter(p => p.png).map(p => p.page) } : {}), ...(openAfter ? { opened: true } : {}),
+        ...(inline ? { inline: out.pages.filter(p => p.png).map(p => p.page) } : {}),
+        ...(openAfter ? (openError ? { opened: false, openError } : { opened: true }) : {}),
         ...(out.pageCount !== cliPageCount ? { pageCountMismatch: { api: cliPageCount, snapshot: out.pageCount } } : {}) };
     }
     if (name === 'api') {

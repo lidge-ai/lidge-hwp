@@ -147,7 +147,7 @@ return { dir: s.dir, pages: s.pages.length, pdf: p.path };
 
 `snapshot(h, { pages, png, pdf, maxPx })`에서 `pages`는 0부터 센 쪽 번호 배열이다(생략하면 전체, 한 번에 200쪽까지).
 PNG는 macOS `sips`로 만들고 긴 변 `maxPx`(기본 1600)에 맞춘다. 결과는 기본 문서의 경우 `~/.lidge-hwp/exports/<문서 ID>/<시각>-<해시>/`, 외부 문서의 경우 `~/.lidge-hwp/exports/external/<UUID>/<상대경로>/<시각>-<해시>/`에 남는다. 출력 위치는 등록된 어느 문서 루트 안에도 둘 수 없다. 응답에는 경로만 담긴다. 같은 호출에서 저장 전에 고친 내용도 그대로 그린다(`origin: 'edited'`).
-`inline: true`를 주면 PNG를 MCP 결과에 이미지로 붙여 에이전트가 파일을 따로 열지 않고 쪽을 본다(한 호출 4쪽까지,
+`pages`와 함께 `inline: true`를 주면 PNG를 MCP 결과에 이미지로 붙여 에이전트가 파일을 따로 열지 않고 쪽을 본다(한 호출 4쪽까지,
 `maxPx` 기본 1400). `hwp.exportPdf(h, { open: true })`는 만든 PDF를 macOS 미리보기로 연다.
 쪽마다 0.3초 정도 걸리므로 긴 문서는 `timeoutMs`를 늘린다. 쪽 나눔은 CLI 조판을 따르므로 편집기와 조금 다를 수 있다.
 

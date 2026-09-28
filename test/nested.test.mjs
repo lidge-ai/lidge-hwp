@@ -135,7 +135,7 @@ async function seed(t) {
   await run('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@local.invalid', 'commit', '-qm', 'seed']);
   const { runAgent } = await import('../server/agent/runner.mjs');
   const context = { store: createDocStore(root), tabs: createTabs(), config: { exportsRoot } };
-  return { root, exportsRoot, agent: c => runAgent({ code: c, timeoutMs: 60000 }, context) };
+  return { root, exportsRoot, context, agent: c => runAgent({ code: c, timeoutMs: 60000 }, context) };
 }
 
 test('hwp_exec: nested helpers, legacy occurrence checkbox, inline snapshot and save', async t => {
@@ -180,6 +180,33 @@ test('inline limits and exportPdf options', async t => {
   assert.equal(pdf.ok, false); assert.match(pdf.error, /inline is a snapshot option/);
   const plain = await f.agent("const h=await hwp.open('form.hwp'); return await hwp.exportPdf(h);");
   assert.equal(plain.ok, true, JSON.stringify(plain)); assert.equal(plain.images, undefined);
+  // 리뷰 1: pages 없는 inline은 모든 쪽을 그리므로 거절한다. 한 호출 4쪽을 넘으면 거절한다.
+  const all = await f.agent("const h=await hwp.open('form.hwp'); return await hwp.snapshot(h,{inline:true});");
+  assert.equal(all.ok, false); assert.match(all.error, /inline needs pages/);
+  const many = await f.agent("const h=await hwp.open('form.hwp'); await hwp.snapshot(h,{pages:[0],inline:true}); await hwp.snapshot(h,{pages:[0],inline:true}); await hwp.snapshot(h,{pages:[0],inline:true}); await hwp.snapshot(h,{pages:[0],inline:true}); return await hwp.snapshot(h,{pages:[0],inline:true});");
+  assert.equal(many.ok, false); assert.match(many.error, /at most 4 pages/);
+  // 리뷰 4: open 실패는 opened:false와 이유로 알린다.
+  f.context.config.openBin = '/usr/bin/false';
+  const failed = await f.agent("const h=await hwp.open('form.hwp'); return await hwp.exportPdf(h,{open:true});");
+  assert.equal(failed.ok, true, JSON.stringify(failed));
+  assert.equal(failed.result.opened, false); assert.ok(failed.result.openError);
+  f.context.config.openBin = '/usr/bin/true';
+  const opened = await f.agent("const h=await hwp.open('form.hwp'); return await hwp.exportPdf(h,{open:true});");
+  assert.equal(opened.result.opened, true); assert.equal(opened.result.openError, undefined);
+});
+
+test('checkbox edits are preflighted as a whole: no partial edit at the batch limit (review 2, 3)', async () => {
+  const { MAX_BATCH_OPS } = await import('../lib/api-registry.mjs');
+  const doc = await open();
+  try {
+    const batch = newBatch({});
+    batch.ops.length = MAX_BATCH_OPS - 1; // 한 자리만 남았다: 표시 하나는 delete+insert 두 call이다
+    batch.ops.fill({ kind: 'call' });
+    const before = cellText(doc, 1, 2);
+    assert.throws(() => setCheckboxHelper(doc, batch, { label: '동의함', scope: { nested: 0, row: 1 } }), /BATCH_TOO_LARGE/);
+    assert.equal(batch.ops.length, MAX_BATCH_OPS - 1);
+    assert.equal(cellText(doc, 1, 2), before);
+  } finally { doc.free(); }
 });
 
 test('imageBlocks refuses files outside the exports root and non-page names', async t => {
