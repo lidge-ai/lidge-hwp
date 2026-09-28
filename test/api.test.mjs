@@ -146,20 +146,28 @@ test('한도: 8MB 넘는 섞인 batch(applyOp·applyCall, 한글)는 BATCH_TOO_L
 
 });
 
-test('MCP 도구 설명: 1500자 이하, help()·selectAll 안내, tools/list가 같은 정의를 낸다', async () => {
-  const { TOOL_SPEC } = await import('../mcp/tool.mjs');
-  assert.ok(TOOL_SPEC.description.length <= 1500);
+// 도구 설명 한도: 중첩 표·체크박스·inline 스냅샷 안내를 넣으며 1500 → 2400자로 늘렸다(긴 사용 지침은 initialize instructions).
+const TOOL_DESCRIPTION_MAX = 2400;
+test('MCP 도구 설명: 한도 이하, help()·selectAll 안내, tools/list가 같은 정의를 내고 initialize가 사용 지침을 준다', async () => {
+  const { TOOL_SPEC, SERVER_INSTRUCTIONS } = await import('../mcp/tool.mjs');
+  assert.ok(TOOL_SPEC.description.length <= TOOL_DESCRIPTION_MAX, String(TOOL_SPEC.description.length));
   assert.match(TOOL_SPEC.description, /hwp\.help\(\)/); assert.match(TOOL_SPEC.description, /selectAll/);
+  for (const s of ['hwp.nestedTables(h)', 'hwp.checkboxes(h', 'inline:true', 'hwp.exportPdf(h,{open?})', '{nested,row,col}'])
+    assert.ok(TOOL_SPEC.description.includes(s), s);
+  for (const s of ['hwp.nestedTables(h)', 'hwp.setCheckbox(h,{label', 'exclusive:true', 'inline:true', 'hwp.save(h) must come last'])
+    assert.ok(SERVER_INSTRUCTIONS.includes(s), s);
   const { spawn } = await import('node:child_process');
   const child = spawn(process.execPath, [new URL('../mcp/server.mjs', import.meta.url).pathname], { stdio: ['pipe', 'pipe', 'ignore'] });
-  const line = await new Promise((resolve, reject) => {
+  const lines = await new Promise((resolve, reject) => {
     let buf = '';
-    child.stdout.on('data', d => { buf += d; const i = buf.indexOf('\n'); if (i >= 0) resolve(buf.slice(0, i)); });
+    child.stdout.on('data', d => { buf += d; const got = buf.split('\n'); if (got.length > 2) resolve(got.slice(0, 2)); });
     child.on('error', reject);
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-03-26' } }) + '\n');
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
   });
   child.kill();
-  assert.deepEqual(JSON.parse(line).result.tools, [JSON.parse(JSON.stringify(TOOL_SPEC))]);
+  assert.equal(JSON.parse(lines[0]).result.instructions, SERVER_INSTRUCTIONS);
+  assert.deepEqual(JSON.parse(lines[1]).result.tools, [JSON.parse(JSON.stringify(TOOL_SPEC))]);
 });
 test('help(): HELPERS가 worker의 도우미 이름을 모두 설명하고 범위 주의를 싣는다', async () => {
   const { HELPERS, apiHelp } = await import('../lib/api-registry.mjs');
@@ -182,7 +190,7 @@ test('wp13 #27 help·도구 설명의 도우미는 모두 hwp. 접두사이고, 
   for (const text of [TOOL_SPEC.description, ...HELPERS.helpers, ...HELPERS.scopes, ...HELPERS.notes, HELPERS.charProps, HELPERS.paraProps])
     assert.deepEqual(text.match(bare), null, text);
   assert.ok(!/(?<![.\w])(splitParagraph|deleteText|replaceAll|createTable|insertRow|mergeCells)\b(?!\()/.test(TOOL_SPEC.description), 'bare helper names in the tool description');
-  assert.ok(TOOL_SPEC.description.length <= 1500, String(TOOL_SPEC.description.length));
+  assert.ok(TOOL_SPEC.description.length <= TOOL_DESCRIPTION_MAX, String(TOOL_SPEC.description.length));
   const all = JSON.stringify(HELPERS);
   for (const s of ['splitLines', "'plain'", "'inherit'", 'occurrence', 'scope', "unit:'pt'", 'from', 'limit', 'PLAIN_STYLE_UNAVAILABLE', 'code', 'details'])
     assert.ok(all.includes(s), s);
