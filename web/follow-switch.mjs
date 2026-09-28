@@ -26,3 +26,18 @@ export async function followSwitch({ id, reservation, element, switchTo, hasCurr
   }
   return switched;
 }
+
+export async function restoreSwitch({ id, expectedLease, currentLease, switchTo, say, reason, nameOf = value => value,
+    currentName = () => null }) {
+  if (currentLease !== expectedLease) return false;
+  try {
+    if ((await switchTo(id, { restore: { reason } })) !== true) throw new Error('NOT_SWITCHED');
+    return true;
+  }
+  catch (error) {
+    const remaining = currentName();
+    say(`AI 작업이 저장 없이 끝났지만 ${nameOf(id)}로 돌아가지 못함(${error.message}) · ${remaining
+      ? `${remaining}에 남습니다` : '목록에서 문서를 다시 선택하세요'}`);
+    return false;
+  }
+}

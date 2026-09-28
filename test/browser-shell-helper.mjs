@@ -22,14 +22,17 @@ export async function until(check, timeout = 20000) {
 export class Cdp {
   constructor(url) {
     this.socket = new WebSocket(url);
-    this.next = 0; this.pending = new Map();
+    this.next = 0; this.pending = new Map(); this.listeners = new Map();
     this.ready = new Promise((resolve, reject) => {
       this.socket.addEventListener('open', resolve, { once: true });
       this.socket.addEventListener('error', reject, { once: true });
     });
     this.socket.addEventListener('message', event => {
       const message = JSON.parse(event.data);
-      if (!message.id) return;
+      if (!message.id) {
+        for (const listener of this.listeners.get(message.method) ?? []) listener(message.params);
+        return;
+      }
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
@@ -54,10 +57,15 @@ export class Cdp {
     const { data } = await this.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
     await writeFile(path, Buffer.from(data, 'base64'));
   }
+  on(method, listener) {
+    const listeners = this.listeners.get(method) ?? new Set();
+    listeners.add(listener); this.listeners.set(method, listeners);
+    return () => listeners.delete(listener);
+  }
   close() { this.socket.close(); }
 }
 export async function withBrowser({ files = [], roots = [], width = 1440, height = 900,
-    intercept = null } = {}, run) {
+    intercept = null, agent = false, agentConfig = {} } = {}, run) {
   const scratch = await mkdtemp(join(tmpdir(), 'lidge-wp16-browser-'));
   const docs = join(scratch, 'docs');
   let server, chrome, cdp;
@@ -79,7 +87,9 @@ export async function withBrowser({ files = [], roots = [], width = 1440, height
       await git('git', ['-C', docs, 'add', '.']);
       await git('git', ['-C', docs, '-c', 'user.name=Test', '-c', 'user.email=test@local.invalid', 'commit', '-qm', 'seed']);
     }
-    server = await createServer({ docsRoot: docs, stateDir: join(scratch, 'state'), startAgentSocket: null });
+    const socketPath = join(scratch, 'agent.sock');
+    server = await createServer({ docsRoot: docs, stateDir: join(scratch, 'state'),
+      ...(agent ? { agentConfig: { ...agentConfig, socketPath } } : { startAgentSocket: null }) });
     for (const root of roots) await server.store.register(root);
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const base = `http://127.0.0.1:${server.address().port}`;
@@ -95,7 +105,7 @@ export async function withBrowser({ files = [], roots = [], width = 1440, height
     await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await until(() => cdp.eval(`return !!document.querySelector('#docs') && document.querySelector('#list-feedback').textContent === '';`));
     if (intercept) await intercept({ cdp, base, docs, server });
-    await run({ cdp, base, docs, server, scratch });
+    await run({ cdp, base, docs, server, scratch, socketPath });
   } finally {
     cdp?.close();
     if (chrome && chrome.exitCode === null) { chrome.kill(); await Promise.race([once(chrome, 'exit'), delay(3000)]); }
