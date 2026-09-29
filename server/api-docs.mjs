@@ -5,12 +5,27 @@ import { normalizeNewDocName } from '../lib/doc-name.mjs';
 import { createBlankHwpBytes } from '../lib/rhwp-node.mjs';
 import { AGENT_PUT_HOLD_MS } from '../lib/config.mjs';
 import { verifyAgentBytes } from '../lib/signature.mjs';
+import { formatOf, familyOf, isEditable, needsConversion, NEW_FORMATS } from '../lib/formats.mjs';
+import { sniffBytes } from '../lib/office/sniff.mjs';
+import { blankBytes } from '../lib/office/blank.mjs';
+import { convert as sofficeConvert } from '../lib/office/soffice.mjs';
 const send = (res, status, value) => {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(value));
 };
 const error = (res, status, code) => send(res, status, { error: { code, message: code } });
-const formatFor = (id) => id.toLowerCase().endsWith('.hwpx') ? 'hwpx' : 'hwp';
+// hwp·hwpx 결과는 예전과 같다. 다른 형식은 형식 레지스트리의 확장자 판정.
+const formatFor = (id) => formatOf(id);
+// 오피스 형식 손실 보고(schemaVersion 2)는 warnings(문자열 코드 목록)를 더 받는다. HWP/HWPX는 schemaVersion 1만.
+function validReport(report, format) {
+  const office = familyOf(format) !== 'hwp';
+  if (report?.schemaVersion !== (office ? 2 : 1) || report.outputFormat !== format
+      || !Number.isSafeInteger(report.count) || !Array.isArray(report.losses)
+      || report.count !== report.losses.length) return false;
+  if (office && (!Array.isArray(report.warnings) || report.warnings.length > 32
+      || !report.warnings.every(w => typeof w === 'string' && /^[A-Z0-9_]{1,64}$/.test(w)))) return false;
+  return true;
+}
 
 async function body(req, maxBytes) {
   const chunks = [];
@@ -23,7 +38,8 @@ async function body(req, maxBytes) {
   return Buffer.concat(chunks);
 }
 
-export function createDocsApi({ store, tabs, pickFolder }) {
+export function createDocsApi({ store, tabs, pickFolder, office = {} }) {
+  const convert = office.convert ?? sofficeConvert;
   let pickInFlight = false;
   const requests = new Map();
   const REQUEST_TTL_MS = 10 * 60 * 1000;
@@ -61,21 +77,23 @@ export function createDocsApi({ store, tabs, pickFolder }) {
             || (group.kind === 'external' && typeof group.key !== 'string')) {
           error(res, 400, 'INVALID_GROUP'); return true;
         }
-        const requested = data.name === undefined ? null : validateSegment(normalizeNewDocName(data.name));
+        const format = data.format === undefined ? 'hwp' : data.format;
+        if (!NEW_FORMATS.includes(format)) { error(res, 400, 'INVALID_FORMAT'); return true; }
+        const requested = data.name === undefined ? null : validateSegment(normalizeNewDocName(data.name, '.' + format));
         const requestId = data.requestId;
         if (requestId !== undefined && (typeof requestId !== 'string' || !/^[0-9a-f-]{36}$/i.test(requestId))) {
           error(res, 400, 'INVALID_REQUEST_ID'); return true;
         }
-        const fingerprint = JSON.stringify({ group, requested });
+        const fingerprint = JSON.stringify({ group, requested, format });
         const prior = requestId && remembered(requestId);
         if (prior) {
           if (prior.fingerprint !== fingerprint) { error(res, 409, 'REQUEST_ID_CONFLICT'); return true; }
           send(res, 201, await prior.promise); return true;
         }
         const create = async () => {
-          const bytes = await createBlankHwpBytes();
+          const bytes = await blankBytes(format, { blankHwp: createBlankHwpBytes });
           for (let n = 1; n <= 10000; n += 1) {
-            const name = requested ?? (n === 1 ? '새 문서.hwp' : `새 문서 ${n}.hwp`);
+            const name = requested ?? (n === 1 ? `새 문서.${format}` : `새 문서 ${n}.${format}`);
             try { return await store.createDocument(group, name, bytes); }
             catch (cause) {
               if ((cause.code === 'DOC_EXISTS' || cause.code === 'DOCUMENT_LOCKED') && !requested) continue;
@@ -212,9 +230,13 @@ export function createDocsApi({ store, tabs, pickFolder }) {
     let agentRequestId, lockToken, outcome = null;
     try {
       if (store.isQuarantined(id)) { error(res, 423, 'DOCUMENT_QUARANTINED'); return true; }
+      const format = formatFor(id);
+      const officeFamily = format !== null && familyOf(format) !== 'hwp';
       // wp3 resolves a pending agent.apply request to its server-held lock token.
       // An arbitrary header cannot authorize the write.
       agentRequestId = req.headers['x-agent-request-id'];
+      // 오피스 형식의 에이전트 저장은 office_exec가 서버 안에서 직접 한다(verifyAgentBytes는 rhwp 전용).
+      if (officeFamily && agentRequestId) { agentRequestId = undefined; error(res, 400, 'AGENT_UNSUPPORTED'); return true; }
       lockToken = agentRequestId
         ? tabs.agentLockFor?.(id, req.headers['x-lease'], agentRequestId) : null;
       if (store.isLocked(id) && !lockToken) { error(res, 423, 'DOCUMENT_LOCKED'); return true; }
@@ -226,15 +248,22 @@ export function createDocsApi({ store, tabs, pickFolder }) {
       }
       if (!tabs.owns(req.headers['x-lease'], id)) { error(res, 409, 'LEASE_REQUIRED'); return true; }
       if (req.headers['x-document-format'] !== formatFor(id)) { error(res, 400, 'FORMAT_MISMATCH'); return true; }
+      // 미리보기 전용 형식(pptx·key·pages 등)은 쓸 수 없다. 사본 변환은 /api/office/convert가 맡는다.
+      if (!isEditable(format)) { error(res, 405, 'FORMAT_READ_ONLY'); return true; }
       let report;
       try { report = JSON.parse(Buffer.from(req.headers['x-content-loss-report'] || '', 'base64').toString('utf8')); }
       catch { error(res, 400, 'INVALID_REPORT'); return true; }
-      if (report?.schemaVersion !== 1 || report.outputFormat !== formatFor(id)
-          || !Number.isSafeInteger(report.count) || !Array.isArray(report.losses)
-          || report.count !== report.losses.length) { error(res, 400, 'INVALID_REPORT'); return true; }
+      if (!validReport(report, format)) { error(res, 400, 'INVALID_REPORT'); return true; }
       if (report.count > 0) { error(res, 422, 'CONTENT_LOSS'); return true; }
-      const bytes = await body(req, 32 * 1024 * 1024);
-      if (!matchesFormat(bytes, formatFor(id))) { error(res, 400, 'INVALID_BYTES'); return true; }
+      let bytes = await body(req, 32 * 1024 * 1024);
+      const source = req.headers['x-source-format'];
+      if (source !== undefined) {
+        // docx로 편집한 odt·rtf·doc: 본문은 docx, 서버가 LibreOffice로 원래 형식으로 되돌린다.
+        if (!officeFamily || source !== 'docx' || !needsConversion(format)) { error(res, 400, 'INVALID_SOURCE_FORMAT'); return true; }
+        if (!sniffBytes(bytes, 'docx')) { error(res, 400, 'INVALID_BYTES'); return true; }
+        bytes = await convert(bytes, { from: 'docx', to: format });
+      }
+      if (officeFamily ? !sniffBytes(bytes, format) : !matchesFormat(bytes, format)) { error(res, 400, 'INVALID_BYTES'); return true; }
       // wp5: 에이전트 저장은 탭 바이트를 Node에서 다시 열어 서버 쪽 손실 보고와 내용 서명을 확인한다.
       // 다르면 409 AGENT_VERIFY_MISMATCH(아래 catch → outcome failed → 채널 saveStatus 되돌리기 경로).
       const verify = lockToken ? await verifyAgentBytes(bytes, formatFor(id), tabs.agentExpected?.(agentRequestId)) : null;

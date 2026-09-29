@@ -205,6 +205,19 @@ export function createTabs() {
     return null;
   }
   function followEnd(lease, payload) {
+    return followEndImpl(lease, payload);
+  }
+  // 그 문서를 연 탭(SSE가 붙은 임대)에 알림 한 번. 답을 기다리지 않는다(office_exec 커밋 뒤 office.changed).
+  function notify(docId, type, payload = {}) {
+    const lease = byDoc.get(docId);
+    const tab = lease && byLease.get(lease);
+    if (!tab?.response || tab.response.writableEnded) return false;
+    try {
+      tab.response.write(`event: ${type}\ndata: ${JSON.stringify({ schemaVersion: 1, type, docId, leaseId: lease, ...payload })}\n\n`);
+      return true;
+    } catch { return false; }
+  }
+  function followEndImpl(lease, payload) {
     const tab = byLease.get(lease);
     if (!tab) return false;
     const data = `event: agent.followEnd\ndata: ${JSON.stringify({ schemaVersion: 1, type: 'agent.followEnd',
@@ -255,6 +268,6 @@ export function createTabs() {
 
   return { claim, owns, owner, claimed, release, events, close, requestAgent, acceptReply,
     agentLockFor, finishAgentSave, saveStatus, waitAgentSave, isIsolated, isolate,
-    followTarget, reserve, cancelReservation, reservationLease, followEnd,
+    followTarget, reserve, cancelReservation, reservationLease, followEnd, notify,
     waitConnected, reservedFor, agentExpected, hasRootActivity, canRename };
 }

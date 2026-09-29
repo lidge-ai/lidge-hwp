@@ -1,13 +1,27 @@
-# LIDGE HWP
+# 종이 (Jongi)
 
-브라우저에서 HWP·HWPX를 편집하고, AI 에이전트가 같은 문서를 고칠 수 있는 로컬 작업대.
+로컬에서 여러 문서 형식을 여는 문서 작업대. HWP·HWPX부터 시트·문서·슬라이드 형식까지 편집하고, AI 에이전트가 같은 문서를 고칠 수 있다.
+제품 표시 이름만 종이(Jongi)로 바뀌었다. 저장소 이름(`lidge-hwp`), 환경 변수 `LIDGE_HWP_*`, 상태 경로 `~/.lidge-hwp`는 이름과 무관하게 그대로 쓴다.
 [rhwp](https://github.com/edwardkim/rhwp) 포크의 Studio·WASM·CLI와 문서 저장 서버를 한 저장소에 담았다.
 앱 코드는 MIT로 공개하며, 문서함은 저장소 밖에 따로 둔다.
+
+## 열고 고칠 수 있는 형식
+
+| 형식 | 편집 | 방식 |
+| --- | --- | --- |
+| HWP, HWPX | 편집 | rhwp Studio 편집기 |
+| XLSX | 편집 | 시트 편집기(FortuneSheet). 저장은 ExcelJS가 바뀐 셀만 원본 위에 덧쓴다 |
+| XLS, ODS, CSV, Numbers | 편집 | 시트 편집기. 열기·저장은 SheetJS가 맡는다 |
+| DOCX | 편집 | docx-editor. 손대지 않은 OOXML은 저장 때 보존한다 |
+| ODT, RTF, DOC | 편집 | LibreOffice로 DOCX로 바꿔 편집하고, 저장 때 원래 형식으로 되돌린다 |
+| Pages | 읽기 전용 | LibreOffice로 DOCX 사본을 만든다 |
+| PPTX, PPT, ODP, KEY | 미리보기 | LibreOffice가 만든 PDF를 pdf.js로 본다. PPTX 사본을 만들 수 있다 |
+| Google Sheets, Docs, Slides | 가져오기 | 공유 링크에서 XLSX·DOCX·PPTX로 가져온다. 가져온 문서는 로컬에서 편집하고 Google 문서로 다시 쓰지 않는다 |
 
 ## 할 수 있는 일
 
 - 프로젝트별 문서 목록과 파일 가져오기, Finder로 외부 폴더 추가·등록 해제, 접고 너비를 조절하는 사이드바
-- 사이드바 문서 이름 바꾸기(F2), 원래 확장자·폴더를 유지하며 Git에 변경 기록
+- 사이드바 문서 이름 바꾸기(열린 문서에서 Enter, 더블클릭, F2), 원래 확장자·폴더를 유지하며 Git에 변경 기록
 - 문서명·저장을 한 줄에 배치한 편집기
 - 표 칸·본문 수정, 글자·문단 서식, 표·문단 구조 편집
 - 저장할 때 내용 손실 검사와 문서별 Git 커밋
@@ -22,6 +36,9 @@
 
 필수 도구: Node.js 26 이상, npm, Git, Rust/Cargo, `wasm-pack`, Rust의
 `wasm32-unknown-unknown` 타깃. 빌드 중 의존성을 내려받으려면 인터넷 연결이 필요하다.
+`npm run build:office`는 시트·문서·슬라이드 편집기 번들을 만들고, Rust 없이도 된다.
+
+LibreOffice는 선택 사항이다. 없어도 HWP·HWPX·XLSX·DOCX 편집은 된다. ODT·RTF·DOC·Pages 열기, 슬라이드 미리보기, 형식 사본 만들기처럼 변환이 필요한 기능에 쓴다. 찾는 순서는 `LIDGE_HWP_SOFFICE` 환경 변수 → `/Applications/LibreOffice.app` → Codex 런타임에 딸린 LibreOfficeDev → `PATH`다. 앱에 LibreOffice를 번들하지 않으므로 별도 설치가 필요하다.
 
 ```sh
 git clone https://github.com/lidge-ai/lidge-hwp.git
@@ -29,19 +46,21 @@ cd lidge-hwp
 npm ci
 rustup target add wasm32-unknown-unknown
 npm run build:studio
+npm run build:office
 
 mkdir -p "$HOME/.lidge-hwp/docs"
 git -C "$HOME/.lidge-hwp/docs" init
 npm start
 ```
 
-[localhost:10500](http://localhost:10500/)에서 프로젝트를 만들고 HWP/HWPX 파일을 가져온다.
+[127.0.0.1:10500](http://127.0.0.1:10500/)에서 프로젝트를 만들고 HWP/HWPX 파일을 가져온다.
 문서함은 독립된 Git 저장소여야 한다. 저장하면 상태줄에 커밋 ID가 표시된다.
 새 문서 버튼이나 ⌥⌘N으로 빈 HWP를 만듭니다. 선택한 그룹, 열린 문서의 그룹, 기본 문서함 순서로 위치를 정합니다. 이름을 생략하면 새 문서.hwp, 새 문서 2.hwp 순서로 중복 없이 저장하고 즉시 이력에 커밋합니다. ⌘N은 Chrome에서 새 창을 여는 예약 키이므로 버튼이나 ⌥⌘N을 쓰세요.
+새 문서 버튼 옆 ▾ 메뉴에서 스프레드시트(XLSX)·워드 문서(DOCX)를 같은 방식으로 만들고, "Google에서 가져오기"로 공유 링크의 시트·문서·슬라이드를 가져온다.
 편집기 안에 포커스가 있어도 F2·⌘⇧R(이름 바꾸기), ⌘⇧C(경로 복사), ⌥⌘N(새 문서)을 문서함으로 보냅니다. ⌘N도 페이지에 전달되는 환경에서는 새 문서로 처리합니다.
 서버 재시작 전에는 편집을 저장하고, 재시작 후에는 문서를 다시 연다.
 
-문서 행의 ‘이름’ 버튼이나 우클릭, 사이드바 포커스에서 F2로 이름을 바꿀 수 있다. 포커스된 문서가 없으면 현재 문서를 선택한다. ⌘⇧R도 이름 바꾸기 단축키이며 검색창에 포커스가 있어도 앱이 먼저 받는다. 미저장 편집은 확인을 받은 뒤 버리고 새 이름으로 다시 열며, 기존 이름이나 다른 형식의 파일을 덮어쓰지 않는다.
+문서 행에는 따로 이름 버튼이 없다. Finder·VS Code처럼 열린 문서 행에서 Enter를 누르거나, 문서를 더블클릭하거나, 우클릭하거나, 사이드바 포커스에서 F2를 눌러 이름을 바꾼다. 아직 열리지 않은 문서에서 Enter는 여는 동작이다. 포커스된 문서가 없으면 현재 문서를 선택한다. ⌘⇧R도 이름 바꾸기 단축키이며 검색창에 포커스가 있어도 앱이 먼저 받는다. 미저장 편집은 확인을 받은 뒤 버리고 새 이름으로 다시 열며, 기존 이름이나 다른 형식의 파일을 덮어쓰지 않는다.
 
 문서 행에 포커스를 두고 ⌘⇧C를 누르면 해당 문서의 검증된 절대 경로를 복사합니다. 행 포커스가 없으면 열린 문서의 경로를 복사합니다. 검색창에 포커스가 있어도 앱이 먼저 받습니다. 헤더의 ‘경로 복사’ 버튼으로도 열린 문서의 경로를 복사할 수 있습니다. 클립보드 권한이 거부되면 상태줄에 실패가 표시됩니다.
 
@@ -74,12 +93,29 @@ npm start
     "lidge-hwp": {
       "command": "node",
       "args": ["/absolute/path/to/lidge-hwp/mcp/server.mjs"]
+    },
+    "jongi-office": {
+      "command": "node",
+      "args": ["/absolute/path/to/lidge-hwp/mcp/office-server.mjs"]
     }
   }
 }
 ```
 
-도구는 `hwp_exec` 하나다. 비동기 JavaScript 코드에서 `hwp` API를 사용한다.
+HWP/HWPX 도구는 `hwp_exec`(서버 `lidge-hwp`)다. 비동기 JavaScript 코드에서 `hwp` API를 사용한다.
+
+오피스 형식은 두 번째 서버 `jongi-office`의 `office_exec`가 맡는다. 코드 안의 전역은 `office` 하나다.
+
+```js
+const h = await office.open('예산.xlsx');
+await office.setCells(h, { start: 'B2', values: [[42, '=B2*2']] }); // '='로 시작하면 수식
+await office.save(h);
+```
+
+시트는 `office.sheets`·`office.read(h,{range})`·`office.setCells`, 문서(docx, odt·rtf·doc)는 `office.paragraphs`·`office.find`·`office.replaceText`·`office.appendParagraph`를 쓴다.
+저장은 호출 전체가 성공했을 때만 한 번 하고, 쓰기 전에 결과를 다시 열어 바꾼 값이 그대로인지 확인한다(다르면 `AGENT_VERIFY_MISMATCH`, 파일 무변경).
+xls·numbers·csv는 수식을 저장하지 못하므로 수식 입력을 `FORMULA_NOT_SAVED`로 거절한다. 슬라이드와 Pages는 읽기 전용이다.
+커밋 작성자는 `agent`이고, 그 문서를 연 편집기 탭은 저장하지 않은 편집이 없으면 새 내용을 다시 읽는다. `office.help()`가 전체 목록을 준다.
 
 ```js
 return await hwp.docs();
@@ -191,6 +227,7 @@ Rust를 바꿨다면 WASM·Studio와 CLI를 함께 빌드해야 한다.
 ## 개발과 라이선스
 
 `npm test`는 앱 테스트를 실행한다. 실문서 통합 검증에는 외부 fixture 경로가 필요하다:
+`npm run test:soffice`는 LibreOffice를 실제로 쓰는 통합 테스트(ODT·RTF 편집, 슬라이드 PDF 변환)다. LibreOffice가 없으면 실패하며 skip되지 않는다.
 `LIDGE_HWP_KU_FIXTURE`(HWPX), `LIDGE_HWP_KU_HWP_FIXTURE`(HWP), `LIDGE_HWP_SIG_FIXTURE`(중첩 표 HWP).
 설정하지 않은 통합 테스트는 skip된다. 개인 문서·기록은 공개본에 포함하지 않는다.
 vendored 엔진의 전체 회귀 테스트에 필요한 일부 원본 문서도 제외되어 있으므로,

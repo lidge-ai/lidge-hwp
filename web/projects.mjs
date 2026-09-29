@@ -2,6 +2,9 @@
 const COLLAPSED_KEY = 'lidge-hwp.projects.collapsed';
 export const ROOT_GROUP = '';
 export const ROOT_LABEL = '기타';
+// 형식 배지 글자(lib/formats.mjs의 label과 같은 규칙). 이 모듈은 Node 테스트도 읽으므로 /formats.mjs를 가져오지 않는다.
+const BADGE_LABELS = { numbers: 'NUM', pages: 'PAGES', key: 'KEY' };
+export const badgeLabel = format => BADGE_LABELS[format] ?? String(format ?? '').toUpperCase();
 
 const icon = (paths) => {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -93,7 +96,7 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
     query = '', onOpen = () => {}, onToggle = () => {}, groupActions = null, onImport = null,
     onRename = () => {}, edit = null, onEditInput = () => {}, onEditKey = () => {},
     onEditBlur = () => {}, showEmpty = true,
-    emptyLabel = '문서함에 HWP/HWPX가 없습니다.' } = {}) {
+    emptyLabel = '문서함에 문서가 없습니다.' } = {}) {
   listEl.textContent = '';
   let shown = 0;
   const filtering = matchDoc({ id: '' }, query) === false;
@@ -123,7 +126,7 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
     const suffix = document.createElement('span'); suffix.className = 'doc-extension'; suffix.textContent = editState.extension;
     wrap.append(suffix); slot.append(wrap);
     const badge = document.createElement('span'); badge.className = 'badge'; badge.setAttribute('aria-hidden', 'true');
-    badge.textContent = badgeText; slot.append(badge); row.append(slot);
+    badge.textContent = badgeText; badge.setAttribute('data-fmt', badgeText.toLowerCase()); slot.append(badge); row.append(slot);
     if (editState.error) {
       const message = document.createElement('div'); message.id = 'doc-name-error';
       message.className = 'name-error'; message.setAttribute('role', 'alert'); message.textContent = editState.error;
@@ -201,9 +204,9 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
     body.id = bodyId;
     body.className = 'group-docs';
     body.hidden = !expanded;
-    if (newHere) appendEdit(body, edit, 'HWP');
+    if (newHere) appendEdit(body, edit, badgeLabel((edit.extension ?? '.hwp').slice(1)));
     for (const doc of docs) {
-      if (edit?.kind === 'rename' && edit.id === doc.id) { appendEdit(body, edit, doc.format.toUpperCase()); continue; }
+      if (edit?.kind === 'rename' && edit.id === doc.id) { appendEdit(body, edit, badgeLabel(doc.format)); continue; }
       const row = document.createElement('li');
       row.className = 'doc-row';
       const button = document.createElement('button');
@@ -216,25 +219,27 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
       button.title = shown;
       button.setAttribute('aria-label', shown);
       button.setAttribute('aria-current', String(doc.id === currentId));
+      // 이름 바꾸기는 따로 버튼을 두지 않는다(Finder·VS Code처럼): 열린 문서에서 Enter, 더블클릭, F2·⌘⇧R, 우클릭.
+      button.setAttribute('aria-keyshortcuts', 'F2 Meta+Shift+R');
       const name = document.createElement('span');
       name.className = 'doc-name';
       name.textContent = doc.name;
       const badge = document.createElement('span');
       badge.className = 'badge';
       badge.setAttribute('aria-hidden', 'true');
-      badge.textContent = doc.format.toUpperCase();
+      badge.textContent = badgeLabel(doc.format);
+      badge.setAttribute('data-fmt', doc.format);
       button.append(name, badge);
       button.addEventListener('click', () => onOpen(doc.id));
+      button.addEventListener('dblclick', event => { event.preventDefault(); onRename(doc.id); });
+      button.addEventListener('keydown', event => {
+        // 아직 열리지 않은 문서의 Enter는 버튼 기본 동작(열기)으로 둔다. preventDefault가 click 합성을 막는다.
+        if (event.key !== 'Enter' || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+        if (button.getAttribute('aria-current') !== 'true') return;
+        event.preventDefault();
+        onRename(doc.id);
+      });
       row.append(button);
-      const rename = document.createElement('button');
-      rename.type = 'button';
-      rename.className = 'doc-rename';
-      rename.textContent = '이름';
-      rename.title = `${shown} 이름 바꾸기 (F2, ⌘⇧R)`;
-      rename.setAttribute('aria-label', `${shown} 이름 바꾸기`);
-      rename.setAttribute('aria-keyshortcuts', 'F2 Meta+Shift+R');
-      rename.addEventListener('click', () => onRename(doc.id));
-      row.append(rename);
       row.addEventListener('contextmenu', event => { event.preventDefault(); onRename(doc.id); });
       body.append(row);
     }

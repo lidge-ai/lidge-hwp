@@ -65,7 +65,7 @@ export class Cdp {
   close() { this.socket.close(); }
 }
 export async function withBrowser({ files = [], roots = [], width = 1440, height = 900,
-    intercept = null, agent = false, agentConfig = {} } = {}, run) {
+    intercept = null, agent = false, agentConfig = {}, office = {} } = {}, run) {
   const scratch = await mkdtemp(join(tmpdir(), 'lidge-wp16-browser-'));
   const docs = join(scratch, 'docs');
   let server, chrome, cdp;
@@ -88,7 +88,7 @@ export async function withBrowser({ files = [], roots = [], width = 1440, height
       await git('git', ['-C', docs, '-c', 'user.name=Test', '-c', 'user.email=test@local.invalid', 'commit', '-qm', 'seed']);
     }
     const socketPath = join(scratch, 'agent.sock');
-    server = await createServer({ docsRoot: docs, stateDir: join(scratch, 'state'),
+    server = await createServer({ docsRoot: docs, stateDir: join(scratch, 'state'), office,
       ...(agent ? { agentConfig: { ...agentConfig, socketPath } } : { startAgentSocket: null }) });
     for (const root of roots) await server.store.register(root);
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));

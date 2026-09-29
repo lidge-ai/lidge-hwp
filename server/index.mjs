@@ -7,6 +7,7 @@ import { createLibrary } from '../lib/library.mjs';
 import { ensureRepo } from '../lib/git.mjs';
 import { createTabs } from './tabs.mjs';
 import { createDocsApi } from './api-docs.mjs';
+import { createOfficeApi } from './api-office.mjs';
 import { pickFolder as defaultPickFolder } from '../lib/folder-picker.mjs';
 import { startAgentSocket as startAgentSocketImpl } from './agent/socket.mjs';
 
@@ -23,7 +24,8 @@ function requiresOrigin(pathname, method) {
   return (method === 'POST' && pathname === '/api/roots/pick')
     || (method === 'DELETE' && pathname.startsWith('/api/roots/'))
     || (method === 'POST' && pathname.startsWith('/api/docs/') && pathname.endsWith('/rename'))
-    || (method === 'POST' && pathname === '/api/docs');
+    || (method === 'POST' && pathname === '/api/docs')
+    || (method === 'POST' && pathname.startsWith('/api/office/'));
 }
 async function readSmallJson(req) {
   const chunks = [];
@@ -64,12 +66,13 @@ async function staticFile(res, base, name) {
 
 export async function createServer({ docsRoot = DOCS_ROOT, buildDir = BUILD_DIR,
     stateDir = STATE_DIR, startAgentSocket = startAgentSocketImpl, agentConfig = {},
-    pickFolder = defaultPickFolder, renameOps = {} } = {}) {
+    pickFolder = defaultPickFolder, renameOps = {}, office = {} } = {}) {
   await ensureRepo(docsRoot);
   const store = await createLibrary({ docsRoot, stateDir, renameOps });
   if (typeof pickFolder !== 'function') throw new TypeError('pickFolder');
   const tabs = createTabs();
-  const docsApi = createDocsApi({ store, tabs, pickFolder });
+  const docsApi = createDocsApi({ store, tabs, pickFolder, office });
+  const officeApi = createOfficeApi({ store, tabs, office });
   const server = http.createServer((req, res) => {
     void (async () => {
       const host = req.headers.host;
@@ -85,6 +88,7 @@ export async function createServer({ docsRoot = DOCS_ROOT, buildDir = BUILD_DIR,
         json(res, 403, { error: { code: 'BAD_ORIGIN', message: 'BAD_ORIGIN' } }); return;
       }
       if (await docsApi.handle(req, res, url.pathname)) return;
+      if (await officeApi.handle(req, res, url.pathname)) return;
       if (url.pathname.startsWith('/api/agent/saves/') && req.method === 'GET') {
         let requestId;
         try { requestId = decodeURIComponent(url.pathname.slice('/api/agent/saves/'.length)); }
@@ -163,6 +167,7 @@ export async function createServer({ docsRoot = DOCS_ROOT, buildDir = BUILD_DIR,
       }
       if (url.pathname === '/') return staticFile(res, join(ROOT, 'web'), 'index.html');
       if (url.pathname === '/doc-name.mjs') return staticFile(res, join(ROOT, 'lib'), 'doc-name.mjs');
+      if (url.pathname === '/formats.mjs') return staticFile(res, join(ROOT, 'lib'), 'formats.mjs');
       // 로컬 편집기는 Studio의 PWA 오프라인 캐시를 쓰지 않는다. 캐시된 옛 Studio가 새 lidge RPC를 모르는 채로
       // 떠서 에이전트 편집이 'Unknown method'로 실패한 적이 있다(wp3 B). sw.js는 스스로 해제하고 캐시를 비운 뒤
       // 열린 창을 다시 불러오는 스크립트로, registerSW.js는 빈 스크립트로 바꿔 준다.
@@ -174,7 +179,7 @@ export async function createServer({ docsRoot = DOCS_ROOT, buildDir = BUILD_DIR,
         res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
         res.end('// lidge-hwp: service worker disabled\n'); return;
       }
-      for (const [prefix, dir] of [['/studio/', 'studio'], ['/editor/', 'editor'], ['/wasm/', 'wasm']]) {
+      for (const [prefix, dir] of [['/studio/', 'studio'], ['/editor/', 'editor'], ['/wasm/', 'wasm'], ['/office/', 'office']]) {
         if (url.pathname.startsWith(prefix)) {
           const name = url.pathname.slice(prefix.length) || 'index.html';
           return staticFile(res, join(buildDir, dir), name);

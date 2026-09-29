@@ -38,8 +38,47 @@ await withBrowser({ files: ['P/a.hwp', 'P/b.hwp', 'P/UPPER.HWP', 'P/x.hwpx'] }, 
   await cdp.eval(`document.querySelector('.rename-input').dispatchEvent(${key('Escape')});`);
   console.log('PASS context menu enters the same inline edit');
 
+  // 이름 버튼이 없어 행 전체 폭을 문서 버튼이 쓴다(hover·focus 때도 오른쪽 예약 공간이 없다).
+  const layoutScript = `const button = document.querySelector(${JSON.stringify(a)}); const row = button.closest('.doc-row');
+    button.focus(); return { renameButtons: document.querySelectorAll('.doc-rename').length,
+      rowWidth: row.getBoundingClientRect().width, docWidth: button.getBoundingClientRect().width,
+      keys: button.getAttribute('aria-keyshortcuts') };`;
+  const layout = await cdp.eval(layoutScript); // justified: CDP Runtime.evaluate test helper, not dynamic eval
+  assert.equal(layout.renameButtons, 0);
+  assert.equal(layout.docWidth, layout.rowWidth);
+  assert.equal(layout.keys, 'F2 Meta+Shift+R');
+  console.log('PASS rows have no rename button and the document button spans the row');
+
+  // Finder·VS Code(macOS)처럼 열린 문서에서 Enter는 이름 바꾸기다.
+  const enterScript = selector => `const button = document.querySelector(${JSON.stringify(selector)}); button.focus();
+    const event = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true });
+    button.dispatchEvent(event); return event.defaultPrevented;`;
+  const escapeEdit = `document.querySelector('.rename-input').dispatchEvent(${key('Escape')});`;
+  assert.equal(await cdp.eval(enterScript(a)), true); // justified: CDP Runtime.evaluate test helper, not dynamic eval
+  await until(() => cdp.eval(`return document.querySelector('.rename-input')?.value === 'a';`)); // justified: CDP Runtime.evaluate test helper, not dynamic eval
+  await cdp.eval(escapeEdit); // justified: CDP Runtime.evaluate test helper, not dynamic eval
+  console.log('PASS Enter on the open document enters inline rename');
+
+  // 열리지 않은 문서의 Enter는 열기만 한다(버튼 기본 동작, 편집 없음).
+  assert.equal(await cdp.eval(enterScript(b)), false); // justified: CDP Runtime.evaluate test helper, not dynamic eval
+  await cdp.eval(`document.querySelector(${JSON.stringify(b)}).click();`); // justified: CDP Runtime.evaluate test helper, not dynamic eval
+  await until(() => cdp.eval(`return document.querySelector('#filename').title === 'P/b.hwp';`)); // justified: CDP Runtime.evaluate test helper, not dynamic eval
+  assert.equal(await cdp.eval(`return !!document.querySelector('.rename-input');`), false); // justified: CDP Runtime.evaluate test helper, not dynamic eval
+  console.log('PASS Enter on another document leaves it to open without editing');
+
+  // 다른 문서 더블클릭: click 두 번이 먼저 그 문서를 연 뒤에도 편집으로 들어가야 한다(감사 블로커 1).
+  const doubleClick = selector => `const button = document.querySelector(${JSON.stringify(selector)});
+    for (const detail of [1, 2]) button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail }));
+    button.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2 }));`;
+  const openedAndEditingA = `return document.querySelector('#filename').title === 'P/a.hwp'
+    && document.querySelector('.rename-input')?.value === 'a';`;
+  await cdp.eval(doubleClick(a)); // justified: CDP Runtime.evaluate test helper, not dynamic eval
+  await until(() => cdp.eval(openedAndEditingA)); // justified: CDP Runtime.evaluate test helper, not dynamic eval
+  await cdp.eval(escapeEdit); // justified: CDP Runtime.evaluate test helper, not dynamic eval
+  console.log('PASS double-click on another document opens it and enters inline rename');
+
   const renameButton = async id => {
-    await cdp.eval(`document.querySelector(${JSON.stringify(idSelector(id))}).parentElement.querySelector('.doc-rename').click();`);
+    await cdp.eval(doubleClick(idSelector(id))); // justified: CDP Runtime.evaluate test helper, not dynamic eval
     await until(() => cdp.eval(`return !!document.querySelector('.rename-input');`));
   };
   await renameButton('P/a.hwp');

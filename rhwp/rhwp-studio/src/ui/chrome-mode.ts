@@ -58,6 +58,7 @@ export const EMBED_HIDDEN_EDIT_COMMAND_IDS: readonly string[] = [
 /** KeyboardEvent에서 단축키 판정에 쓰는 부분 — 순수 함수 테스트용 구조적 타입. */
 export interface EmbedShortcutKeyEventLike {
   key: string;
+  code?: string;
   ctrlKey: boolean;
   metaKey: boolean;
   altKey: boolean;
@@ -109,17 +110,18 @@ export function hostShortcutDecision(
  * preventDefault로 삼키지만, 문서 로드 전에는 그 경로 자체가 없어 브라우저
  * 저장/인쇄 대화상자로 빠진다. Alt+N/Ctrl+O는 전역 단축키 핸들러가 문서 유무와
  * 무관하게 이미 삼키므로 제외한다. 한글 IME 키(ㄴ/ㅔ)는 전역 핸들러의 ㅜ/ㅐ
- * 처리와 같은 이유로 함께 받는다.
+ * 처리와 같은 이유로 함께 받는다. IME가 키를 먹으면 key가 'Process'로 오므로
+ * 물리 키(code KeyS/KeyP)도 본다.
  */
 export function isEmbedSwallowedFileShortcut(e: EmbedShortcutKeyEventLike): boolean {
   if (!(e.ctrlKey || e.metaKey) || e.altKey) return false;
   const key = e.key.toLowerCase();
   // Ctrl+S 저장, Ctrl+Shift+S 다른 이름으로 저장
-  if (key === 's' || key === 'ㄴ') return true;
+  if (e.code === 'KeyS' || key === 's' || key === 'ㄴ') return true;
   // Ctrl+P 인쇄, Ctrl+Shift+P 크롬 시스템 인쇄 대화상자 — 후자의 문서 로드 후
   // 매핑(table:block-product)은 InputHandler가 어차피 preventDefault하므로
   // 전역 흡수가 그 경로를 해치지 않는다.
-  return key === 'p' || key === 'ㅔ';
+  return e.code === 'KeyP' || key === 'p' || key === 'ㅔ';
 }
 
 export function resolveChromeMode(search = ''): ChromeMode {

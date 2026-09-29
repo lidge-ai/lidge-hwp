@@ -395,7 +395,8 @@ if (chromeMode === 'embed') {
   // 등의 stopPropagation보다 먼저 돌며, preventDefault만 한다 — 대상 커맨드는
   // embed에서 미등록이고, InputHandler 활성 시의 중복 preventDefault는 무해하다.
   // Ctrl+S는 예외: embed 저장은 lidge 호스트 저장으로 보내므로 여기서 file:save를
-  // 한 번만 dispatch하고 이후 전파를 막는다.
+  // 한 번만 dispatch하고 이후 전파를 막는다. 물리 키(code KeyS)도 본다 — IME가 키를
+  // 먹으면 key가 'Process'로 와서 key만 보면 브라우저 "페이지 저장"으로 샌다(셸 isSaveShortcut과 같은 규칙).
   document.addEventListener('keydown', (e) => {
     const { prevent, forward } = hostShortcutDecision(
       e, e.target, !!document.querySelector('.modal-overlay, .cp-overlay'),
@@ -407,7 +408,7 @@ if (chromeMode === 'embed') {
       return;
     }
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey
-        && (e.key.toLowerCase() === 's' || e.key === 'ㄴ')) {
+        && (e.code === 'KeyS' || e.key.toLowerCase() === 's' || e.key === 'ㄴ')) {
       e.preventDefault();
       e.stopImmediatePropagation();
       dispatcher.dispatch('file:save');
