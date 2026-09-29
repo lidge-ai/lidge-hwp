@@ -219,6 +219,8 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
       button.title = shown;
       button.setAttribute('aria-label', shown);
       button.setAttribute('aria-current', String(doc.id === currentId));
+      // 이름 바꾸기는 따로 버튼을 두지 않는다(Finder·VS Code처럼): 열린 문서에서 Enter, 더블클릭, F2·⌘⇧R, 우클릭.
+      button.setAttribute('aria-keyshortcuts', 'F2 Meta+Shift+R');
       const name = document.createElement('span');
       name.className = 'doc-name';
       name.textContent = doc.name;
@@ -229,16 +231,15 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
       badge.setAttribute('data-fmt', doc.format);
       button.append(name, badge);
       button.addEventListener('click', () => onOpen(doc.id));
+      button.addEventListener('dblclick', event => { event.preventDefault(); onRename(doc.id); });
+      button.addEventListener('keydown', event => {
+        // 아직 열리지 않은 문서의 Enter는 버튼 기본 동작(열기)으로 둔다. preventDefault가 click 합성을 막는다.
+        if (event.key !== 'Enter' || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+        if (button.getAttribute('aria-current') !== 'true') return;
+        event.preventDefault();
+        onRename(doc.id);
+      });
       row.append(button);
-      const rename = document.createElement('button');
-      rename.type = 'button';
-      rename.className = 'doc-rename';
-      rename.textContent = '이름';
-      rename.title = `${shown} 이름 바꾸기 (F2, ⌘⇧R)`;
-      rename.setAttribute('aria-label', `${shown} 이름 바꾸기`);
-      rename.setAttribute('aria-keyshortcuts', 'F2 Meta+Shift+R');
-      rename.addEventListener('click', () => onRename(doc.id));
-      row.append(rename);
       row.addEventListener('contextmenu', event => { event.preventDefault(); onRename(doc.id); });
       body.append(row);
     }

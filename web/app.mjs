@@ -566,7 +566,9 @@ function showRow(id) {
 }
 async function beginRename(id) {
   if (editing?.pending) return;
-  if (current?.id !== id && !(await openDoc(id))) return;
+  // 더블클릭은 click 두 번(열기 두 번)을 먼저 큐에 넣는다. 여기서 부르는 열기는 이미 열린 문서라 false를 돌려주므로,
+  // 호출 결과가 아니라 큐가 끝난 뒤 그 문서가 현재인지로 판단한다. 저장 중·열기 실패면 current가 달라 멈춘다.
+  if (current?.id !== id) { await openDoc(id); if (current?.id !== id) return; }
   showRow(id);
   const file = id.split('/').at(-1);
   // 확장자는 형식 레지스트리가 아는 것만 이름 바꾸기 대상이다(서버도 같은 확장자만 허용한다).
