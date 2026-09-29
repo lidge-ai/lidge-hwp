@@ -14,6 +14,30 @@ const run = promisify(execFile);
 const odt = () => writeZip(new Map([['mimetype', bytesOf('application/vnd.oasis.opendocument.text')], ['content.xml', bytesOf('<x/>')]]), { compression: false });
 const pptx = () => writeZip(new Map([['ppt/presentation.xml', bytesOf('<p/>')]]));
 
+
+test('pdf view: converted once then cached, safe headers, 422 on failure, 413 over 32MB', async t => {
+  let calls = 0, fail = false;
+  const convert = async (bytes, { to }) => { calls += 1; if (fail) throw Object.assign(new Error('CONVERT_FAILED'), { status: 502, code: 'CONVERT_FAILED' }); return to === 'pdf' ? Buffer.from('%PDF-1.7 fake') : bytes; };
+  const { base, root } = await setup(t, convert);
+  const url = base + '/api/office/pdf/' + encodeURIComponent('proj/sub/발표.pptx');
+  const first = await fetch(url);
+  assert.equal(first.status, 200);
+  assert.equal(first.headers.get('content-type'), 'application/pdf');
+  assert.equal(first.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(first.headers.get('content-disposition'), /^inline; .*filename\*=UTF-8''%EB%B0%9C%ED%91%9C\.pdf$/);
+  assert.equal((await first.text()).slice(0, 4), '%PDF');
+  await fetch(url);
+  assert.equal(calls, 1, 'second request hits the pdf cache');
+  fail = true;
+  const failed = await fetch(base + '/api/office/pdf/' + encodeURIComponent('원고.docx'));
+  assert.equal(failed.status, 422);
+  assert.equal((await failed.json()).error.code, 'UNSUPPORTED_SOURCE');
+  fail = false;
+  await writeFile(join(root, '큰.pptx'), Buffer.concat([pptx(), Buffer.alloc(33 * 1024 * 1024)]));
+  const big = await fetch(base + '/api/office/pdf/' + encodeURIComponent('큰.pptx'));
+  assert.equal(big.status, 413);
+});
+
 async function setup(t, convert) {
   const root = await mkdtemp(join(tmpdir(), 'jongi-copy-'));
   const stateDir = await mkdtemp(join(tmpdir(), 'jongi-copy-state-'));
@@ -90,4 +114,3 @@ test('copy: editor bytes become a sibling docx; server conversion makes a pptx�
   assert.equal((await post('원고.docx', 'odt', new Uint8Array(0), null)).status, 403); // Origin 필요
   assert.equal((await post('없음.docx', 'odt')).status, 404);
 });
-

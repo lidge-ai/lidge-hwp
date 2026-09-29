@@ -59,6 +59,7 @@ export function createOfficeApi({ store, tabs, office = {} }) {
   const convert = office.convert ?? sofficeConvert;
   const locate = office.findSoffice ?? findSoffice;
   const editableCache = createCache();
+  const pdfCache = createCache();
   // 원본 → 다른 형식. LibreOffice가 못 여는 파일(최신 Pages/Keynote 등)은 422 UNSUPPORTED_SOURCE.
   async function converted(cache, bytes, from, to) {
     const key = sha256(bytes) + ':' + from + ':' + to;
@@ -71,6 +72,7 @@ export function createOfficeApi({ store, tabs, office = {} }) {
       throw Object.assign(new Error('UNSUPPORTED_SOURCE'), { status: 422, code: 'UNSUPPORTED_SOURCE', cause });
     }
     if (to !== 'pdf' && !sniffBytes(out, to)) throw Object.assign(new Error('UNSUPPORTED_SOURCE'), { status: 422, code: 'UNSUPPORTED_SOURCE' });
+    if (to === 'pdf' && Buffer.from(out.subarray(0, 4)).toString('latin1') !== '%PDF') throw Object.assign(new Error('UNSUPPORTED_SOURCE'), { status: 422, code: 'UNSUPPORTED_SOURCE' });
     cache?.set(key, out);
     return out;
   }
@@ -91,6 +93,19 @@ export function createOfficeApi({ store, tabs, office = {} }) {
         const out = doc.format === 'docx' ? doc.bytes : await converted(editableCache, doc.bytes, doc.format, 'docx');
         res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': out.length,
           'X-Editable-Format': 'docx', 'X-Source-Sha256': doc.sha256, 'Cache-Control': 'no-store' });
+        res.end(out);
+        return true;
+      }
+      // GET /api/office/pdf/<id>: 보기용 PDF(슬라이드 미리보기, PDF로 보기). LibreOffice가 못 여는 파일은 422.
+      if (route.startsWith('pdf/') && req.method === 'GET') {
+        const id = decodeId(route.slice('pdf/'.length));
+        const doc = await store.read(id);
+        if (doc.bytes.length > 32 * 1024 * 1024) { error(res, 413, 'TOO_LARGE'); return true; }
+        const out = await converted(pdfCache, doc.bytes, doc.format, 'pdf');
+        const name = id.split('/').at(-1).replace(/\.[^.]+$/, '') + '.pdf';
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': out.length,
+          'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store',
+          'Content-Disposition': "inline; filename=\"document.pdf\"; filename*=UTF-8''" + encodeURIComponent(name) });
         res.end(out);
         return true;
       }

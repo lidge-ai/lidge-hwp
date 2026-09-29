@@ -286,8 +286,9 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
 async function save() {
   if (!current || saving || agentLocked) return;
   if (!isEditable(current.format)) {
-    // 편집기가 있는 읽기 전용 형식(Pages)은 편집한 내용을 DOCX 사본으로 남긴다.
+    // 편집기가 있는 읽기 전용 형식(Pages)은 편집한 내용을 DOCX 사본으로 남긴다. 슬라이드는 서버가 PPTX 사본을 만든다.
     if (current.editor?.family === 'doc') return saveCopy('docx', { fromEditor: true });
+    if (current.editor?.family === 'slides' && current.format !== 'pptx') return saveCopy('pptx');
     say(`${labelOf(current.format)}는 미리보기 전용입니다 · 사본으로 변환해 편집하세요`); return;
   }
   saving = true;
@@ -322,10 +323,13 @@ async function save() {
   finally { saving = false; syncSaveButton(); }
 }
 
-// 저장 버튼: 편집 가능한 형식은 "저장", 편집기가 있는 읽기 전용 형식(Pages)은 "DOCX 사본", 미리보기 전용은 끔.
+// 저장 버튼: 편집 가능한 형식은 "저장", Pages는 "DOCX 사본", pptx가 아닌 슬라이드는 "PPTX 사본", pptx 미리보기는 끔.
 function syncSaveButton() {
-  const copyOnly = current && !isEditable(current.format) && current.editor?.family === 'doc';
-  saveButton.textContent = copyOnly ? 'DOCX 사본' : '저장';
+  const family = current?.editor?.family;
+  const copyTarget = !current || isEditable(current.format) ? null
+    : family === 'doc' ? 'docx' : family === 'slides' && current.format !== 'pptx' ? 'pptx' : null;
+  const copyOnly = Boolean(copyTarget);
+  saveButton.textContent = copyOnly ? `${labelOf(copyTarget)} 사본` : '저장';
   saveButton.disabled = !current || agentLocked || saving || (!isEditable(current.format) && !copyOnly);
 }
 

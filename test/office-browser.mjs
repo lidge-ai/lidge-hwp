@@ -10,6 +10,7 @@ import ZAHL from 'xlsx/dist/xlsx.zahl.mjs';
 import { blankDocx } from '../lib/office/blank.mjs';
 import { appendParagraph, documentText } from '../lib/office/docx-text.mjs';
 import { convert } from '../lib/office/soffice.mjs';
+import { slidesAs } from './helpers/slides-fixture.mjs';
 import { withBrowser, until, expect as assert } from './browser-shell-helper.mjs';
 
 const git = promisify(execFile);
@@ -42,6 +43,8 @@ await withBrowser({ files: ['메모.hwp'] }, async ({ cdp, docs }) => {
   await writeFile(join(docs, '표.csv'), '이름,점수\n가,1\n나,2\n');
   await writeFile(join(docs, '회의록.docx'), appendParagraph(blankDocx(), '첫 문단'));
   await writeFile(join(docs, '초안.odt'), await convert(appendParagraph(blankDocx(), 'ODT 문단'), { from: 'docx', to: 'odt' }));
+  await writeFile(join(docs, '발표.pptx'), await slidesAs(['첫 슬라이드', '둘째 슬라이드', '셋째 슬라이드'], 'pptx'));
+  await writeFile(join(docs, '기획.odp'), await slidesAs(['ODP 슬라이드'], 'odp'));
   await git('git', ['-C', docs, 'add', '.']);
   await git('git', ['-C', docs, '-c', 'user.name=Test', '-c', 'user.email=test@local.invalid', 'commit', '-qm', 'office seed']);
   await page("document.querySelector('#docs-refresh').click();");
@@ -146,4 +149,19 @@ await withBrowser({ files: ['메모.hwp'] }, async ({ cdp, docs }) => {
   assert.match(documentText(odtBack), /고친 부분/);
   await cdp.shot(join(OUT, '08-odt-saved.png'));
   console.log('PASS odt open(as docx)/edit/save(back to odt)');
+
+  // 7. pptx: PDF로 그려 썸네일·큰 쪽을 보여 주고 저장 버튼은 끈다. odp는 "PPTX 사본"으로 사본을 만든다.
+  await open('발표.pptx');
+  await until(() => page("return document.querySelectorAll('#office-host .slide-thumb canvas').length === 3 && !!document.querySelector('#office-host .slide-stage canvas');"), 30000);
+  assert.equal(await page("return document.querySelector('#save').disabled;"), true);
+  await cdp.shot(join(OUT, '09-pptx-preview.png'));
+  console.log('PASS pptx preview renders 3 slides, save disabled');
+  await open('기획.odp');
+  assert.equal(await page("return document.querySelector('#save').textContent;"), 'PPTX 사본');
+  await page("document.querySelector('#save').click();");
+  await until(() => page("return document.querySelector('#filename').title === '기획.pptx' && document.body.dataset.shellState === 'open';"), 30000);
+  await until(() => page("return !!document.querySelector('#office-host .slide-stage canvas');"), 30000);
+  assert.equal(await lastCommit('기획.pptx'), 'Add 기획.pptx');
+  await cdp.shot(join(OUT, '10-odp-copied.png'));
+  console.log('PASS odp → PPTX copy is created, committed and opened');
 });
