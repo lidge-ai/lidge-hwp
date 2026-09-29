@@ -93,7 +93,7 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
     query = '', onOpen = () => {}, onToggle = () => {}, groupActions = null, onImport = null,
     onRename = () => {}, edit = null, onEditInput = () => {}, onEditKey = () => {},
     onEditBlur = () => {}, showEmpty = true,
-    emptyLabel = '문서함에 HWP/HWPX가 없습니다.' } = {}) {
+    emptyLabel = '문서함에 문서가 없습니다.' } = {}) {
   listEl.textContent = '';
   let shown = 0;
   const filtering = matchDoc({ id: '' }, query) === false;

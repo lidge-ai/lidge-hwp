@@ -5,6 +5,7 @@ import { shellShortcutDecision } from '/shell-shortcuts.mjs';
 import { dispatchHostEvent } from '/host-shortcuts.mjs';
 import { initSidebar } from '/sidebar.mjs';
 import { normalizeNewDocName } from '/doc-name.mjs';
+import { ACCEPT, familyOf, formatOf, labelOf } from '/formats.mjs';
 import { groupDocs, groupKeyOf, createGroupFor, matchDoc, renderProjects, readCollapsedGroups, writeCollapsedGroups, bindListKeys, displayName } from '/projects.mjs';
 
 initSidebar();
@@ -42,6 +43,7 @@ function setShellState(state) {
     studioHost.inert = false;
   }
   shellMessage.textContent = state.reason === 'STUDIO_FAILED' ? '편집기를 시작하지 못했습니다'
+    : state.reason === 'EDITOR_PENDING' ? '이 형식의 편집기는 곧 붙습니다'
     : state.kind === 'opening' ? '문서를 여는 중…'
     : state.kind === 'error' ? `${nameOf(state.attemptedId)} 문서를 열지 못했습니다`
     : '목록에서 문서를 선택하세요';
@@ -143,7 +145,9 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
     const bytes = await response.arrayBuffer();
     const etag = response.headers.get('ETag');
     const format = response.headers.get('X-Document-Format');
-    if (!etag || !['hwp', 'hwpx'].includes(format)) throw new Error('Invalid document response');
+    if (!etag || !format || formatOf(id) !== format) throw new Error('Invalid document response');
+    // HWP/HWPX가 아닌 형식은 오피스 편집기가 맡는다. 붙기 전에는 임대를 잡지 않고 멈춘다.
+    if (familyOf(format) !== 'hwp') throw new Error('EDITOR_PENDING');
     const leaseResponse = await api('/api/tabs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(reservation ? { docId: id, reservation } : { docId: id }) });
     const { lease } = await leaseResponse.json();
@@ -227,6 +231,7 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
     if (agent || rethrow) throw error;
     say(error.message === 'DOCUMENT_LOCKED'
       ? 'AI가 편집 중입니다 · 잠시 뒤 다시 여세요'
+      : error.message === 'EDITOR_PENDING' ? '이 형식의 편집기는 곧 붙습니다'
       : '문서를 열지 못했습니다 · 다시 열어 보세요');
     return false;
   }
@@ -331,7 +336,7 @@ function renderDocs() {
     ...editOptions, showEmpty: !query,
     onRename: id => { void beginRename(id); },
     emptyLabel: externalGroups.length === 0 ? '추가한 폴더가 없습니다.'
-      : externalGroups.every(group => group.available === false) ? '' : '추가한 폴더에 HWP/HWPX가 없습니다.',
+      : externalGroups.every(group => group.available === false) ? '' : '추가한 폴더에 문서가 없습니다.',
     onOpen: id => { openHadListFocus = externalList.contains(document.activeElement); void openDoc(id); },
     onToggle: (key, expanded) => {
       if (expanded) collapsedGroups.delete(key); else collapsedGroups.add(key);
@@ -377,7 +382,7 @@ async function loadDocs() {
     ({ primary: groups, external: externalGroups } = groupDocs(docs, projects, roots));
     renderDocs();
     feedback.textContent = '';
-    if (!current) say(docs.length === 0 ? '문서함에 HWP/HWPX가 없습니다.' : '');
+    if (!current) say(docs.length === 0 ? '문서함에 문서가 없습니다.' : '');
   } catch (error) {
     feedback.textContent = '문서 목록을 불러오지 못했습니다 · ';
     const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = '다시 시도';
@@ -466,7 +471,9 @@ async function beginRename(id) {
   if (current?.id !== id && !(await openDoc(id))) return;
   showRow(id);
   const file = id.split('/').at(-1);
-  const match = /^(.*)(\.hwpx|\.hwp)$/i.exec(file);
+  // 확장자는 형식 레지스트리가 아는 것만 이름 바꾸기 대상이다(서버도 같은 확장자만 허용한다).
+  const match = /^(.*)(\.[a-z0-9]+)$/i.exec(file);
+  if (!match || !formatOf(file)) return;
   editing = { kind: 'rename', id, label: nameOf(id), groupKey: groupKeyOf(id),
     draft: match[1], extension: match[2], selection: null, error: null, pending: false };
   renderDocs(); focusEdit();
@@ -503,6 +510,8 @@ const EDIT_ERRORS = { DOC_EXISTS: '이미 같은 이름의 문서가 있습니�
 function showEditError(code) {
   if (!editing) return;
   editing.error = EDIT_ERRORS[code] || '이름을 저장하지 못했습니다';
+  if (code === 'INVALID_FORMAT' && editing.kind === 'new' && editing.extension !== '.hwp')
+    editing.error = `새 문서는 ${labelOf(editing.extension.slice(1))} 형식으로만 만들 수 있습니다`;
   editing.pending = false;
   renderDocs();
   focusEdit();
@@ -736,7 +745,7 @@ document.addEventListener('drop', (event) => { if (fileDrag(event)) event.preven
 
 const filePicker = document.createElement('input');
 filePicker.type = 'file';
-filePicker.accept = '.hwp,.hwpx';
+filePicker.accept = ACCEPT;
 filePicker.multiple = true;
 filePicker.hidden = true;
 document.body.append(filePicker);
@@ -750,7 +759,7 @@ filePicker.addEventListener('change', () => {
   if (pickTarget && filePicker.files.length) void importFiles(pickTarget, filePicker.files);
   pickTarget = null;
 });
-const IMPORT_ERRORS = { INVALID_FORMAT: 'HWP/HWPX만 가져올 수 있습니다', INVALID_BYTES: '파일이 손상되었거나 형식이 다릅니다',
+const IMPORT_ERRORS = { INVALID_FORMAT: '지원하지 않는 형식입니다', INVALID_BYTES: '파일이 손상되었거나 형식이 다릅니다',
   DOC_EXISTS: '같은 이름의 문서가 있습니다', PROJECT_NOT_FOUND: '프로젝트를 찾을 수 없습니다' };
 async function importFiles(project, files) {
   const done = [];
