@@ -53,3 +53,17 @@ HWP/HWPX는 지금의 rhwp 경로를 그대로 쓴다. 다른 형식은 형식 �
 
 범위 밖: Google 쪽 되쓰기(OAuth 필요), pptx 본문 편집, 최신 Pages/Keynote 편집(LibreOffice가 열지 못함), Docker 문서 서버.
 LibreOffice가 필요한 테스트는 `npm run test:soffice`로 따로 돈다. 건너뛰지 않고, soffice가 없으면 실패한다.
+
+### 상태와 남은 일 (2026-09-29)
+
+1~6단계는 PR [#41](https://github.com/lidge-ai/lidge-hwp/pull/41)에 들어 있다(`dev` 대상, 병합 전). 로컬 `npm test` 0 실패, `npm run test:soffice` 9/9, 브라우저 시나리오 전부 통과. 수동 CI는 아직 돌리지 않았다.
+
+알고 있는 한계:
+
+- SheetJS CE로 쓴 .numbers를 다시 읽으면 큰 수에 부동소수 오차가 붙는 경우가 있다(예: 30004500 → 30004500.000000004). 값 대부분은 그대로다.
+- xls·numbers·csv는 수식을 저장하지 못한다(편집기는 저장 전 경고, office_exec는 `FORMULA_NOT_SAVED`로 거절).
+- 시트 화면에서 값을 바꿔도 다른 셀의 수식 결과가 곧바로 다시 계산되지 않는다. 저장한 xlsx는 열 때 다시 계산하도록 표시한다.
+- 최신 Pages·Keynote(iWork 2013 이후)는 LibreOffice가 열지 못한다.
+- docx 편집기는 글꼴 측정 없이 쪽 나눔을 추정한다(저장 바이트에는 영향 없음).
+- `office_exec`는 두 번째 MCP 서버(`mcp/office-server.mjs`)다. Aside 자동 등록은 아직 `hwp_exec`만 한다.
+- 다크 모드와 아이콘 세트 교체는 뒤로 미뤘다.
