@@ -2,6 +2,9 @@
 const COLLAPSED_KEY = 'lidge-hwp.projects.collapsed';
 export const ROOT_GROUP = '';
 export const ROOT_LABEL = '기타';
+// 형식 배지 글자(lib/formats.mjs의 label과 같은 규칙). 이 모듈은 Node 테스트도 읽으므로 /formats.mjs를 가져오지 않는다.
+const BADGE_LABELS = { numbers: 'NUM', pages: 'PAGES', key: 'KEY' };
+export const badgeLabel = format => BADGE_LABELS[format] ?? String(format ?? '').toUpperCase();
 
 const icon = (paths) => {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -123,7 +126,7 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
     const suffix = document.createElement('span'); suffix.className = 'doc-extension'; suffix.textContent = editState.extension;
     wrap.append(suffix); slot.append(wrap);
     const badge = document.createElement('span'); badge.className = 'badge'; badge.setAttribute('aria-hidden', 'true');
-    badge.textContent = badgeText; slot.append(badge); row.append(slot);
+    badge.textContent = badgeText; badge.setAttribute('data-fmt', badgeText.toLowerCase()); slot.append(badge); row.append(slot);
     if (editState.error) {
       const message = document.createElement('div'); message.id = 'doc-name-error';
       message.className = 'name-error'; message.setAttribute('role', 'alert'); message.textContent = editState.error;
@@ -201,9 +204,9 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
     body.id = bodyId;
     body.className = 'group-docs';
     body.hidden = !expanded;
-    if (newHere) appendEdit(body, edit, 'HWP');
+    if (newHere) appendEdit(body, edit, badgeLabel((edit.extension ?? '.hwp').slice(1)));
     for (const doc of docs) {
-      if (edit?.kind === 'rename' && edit.id === doc.id) { appendEdit(body, edit, doc.format.toUpperCase()); continue; }
+      if (edit?.kind === 'rename' && edit.id === doc.id) { appendEdit(body, edit, badgeLabel(doc.format)); continue; }
       const row = document.createElement('li');
       row.className = 'doc-row';
       const button = document.createElement('button');
@@ -222,7 +225,8 @@ export function renderProjects(listEl, groups, { currentId = null, collapsed = n
       const badge = document.createElement('span');
       badge.className = 'badge';
       badge.setAttribute('aria-hidden', 'true');
-      badge.textContent = doc.format.toUpperCase();
+      badge.textContent = badgeLabel(doc.format);
+      badge.setAttribute('data-fmt', doc.format);
       button.append(name, badge);
       button.addEventListener('click', () => onOpen(doc.id));
       row.append(button);

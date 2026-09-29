@@ -25,6 +25,10 @@ const status = document.querySelector('#status');
 const filename = document.querySelector('#filename');
 const saveButton = document.querySelector('#save');
 const newButton = document.querySelector('#new-doc');
+const docFormat = document.querySelector('#doc-format');
+const newMenuButton = document.querySelector('#new-menu');
+const newMenu = document.querySelector('#new-menu-list');
+const importDialog = document.querySelector('#import-dialog');
 const copyPathButton = document.querySelector('#copy-path');
 const shellMessage = document.querySelector('#shell-message');
 const shellRetry = document.querySelector('#shell-retry');
@@ -248,6 +252,7 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
     // 오피스 편집기는 숨긴 채 붙였으므로 보이게 된 뒤 크기를 다시 재게 한다(FortuneSheet 캔버스는 창 resize를 듣는다).
     if (tab.editor) requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
     filename.textContent = nameOf(id); filename.title = id;
+    docFormat.textContent = labelOf(format); docFormat.dataset.fmt = format; docFormat.hidden = false;
     syncSaveButton();
     for (const button of document.querySelectorAll('#docs button[data-id], #external-docs button[data-id]')) button.setAttribute('aria-current', String(button.dataset.id === id));
     // 방금 연 문서의 그룹이 접혀 있으면 펼치고 활성 버튼이 보이게 한다.
@@ -268,6 +273,7 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
       syncCopyPathButton();
       // 이전 문서는 이미 반납했다. 화면에 남은 옛 문서를 편집·저장할 수 없게 덮고, 목록에서 다시 고르게 한다.
       filename.textContent = ''; filename.title = '';
+      docFormat.hidden = true;
       saveButton.disabled = true;
       for (const button of document.querySelectorAll('#docs button[data-id], #external-docs button[data-id]')) button.setAttribute('aria-current', 'false');
       setShellState({ kind: 'error', attemptedId: id, reason: error.message });
@@ -493,7 +499,7 @@ function announceSearch() {
   }, 300);
 }
 
-async function newDocument(name, group) {
+async function newDocument(name, group, format = 'hwp') {
   if (creating) return { ok: false, created: null };
   creating = true;
   const requestId = crypto.randomUUID();
@@ -501,7 +507,7 @@ async function newDocument(name, group) {
     let response;
     try {
       response = await api('/api/docs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ group, requestId, ...(name !== undefined ? { name } : {}) }) });
+        body: JSON.stringify({ group, requestId, ...(format !== 'hwp' ? { format } : {}), ...(name !== undefined ? { name } : {}) }) });
     } catch (error) {
       if (error instanceof TypeError) {
         return settleUnknown(requestId);
@@ -570,11 +576,13 @@ async function beginRename(id) {
     draft: match[1], extension: match[2], selection: null, error: null, pending: false };
   renderDocs(); focusEdit();
 }
-function beginNewDraft() {
+// extension: '.hwp'(기본, ⌘N·새 문서 버튼), '.xlsx', '.docx'(새 문서 메뉴).
+function beginNewDraft(extension = '.hwp') {
+  if (typeof extension !== 'string') extension = '.hwp'; // 클릭 이벤트로 불릴 때
   if (editing?.pending || creating) return;
   const target = createGroupFor([...groups, ...externalGroups], selectedGroupKey, current?.id);
   const groupKey = target.kind === 'default' ? '' : target.kind === 'external' ? `ext://${target.key}` : target.name;
-  editing = { kind: 'new', group: target, groupKey, draft: '새 문서', extension: '.hwp',
+  editing = { kind: 'new', group: target, groupKey, draft: '새 문서', extension,
     touched: false, selection: null, error: null, pending: false,
     previousFilter: docFilter.value, wasCollapsed: collapsedGroups.has(groupKey) };
   docFilter.value = '';
@@ -637,12 +645,12 @@ async function submitEdit() {
   try {
     const base = edit.draft.trim().normalize('NFC');
     if (!base) throw new Error('INVALID_NAME');
-    name = edit.kind === 'new' ? (edit.touched ? normalizeNewDocName(base) : undefined)
+    name = edit.kind === 'new' ? (edit.touched ? normalizeNewDocName(base, edit.extension) : undefined)
       : `${base}${edit.extension}`;
   } catch (error) { showEditError(error.message); return; }
   edit.pending = true; renderDocs();
   const input = document.querySelector('.doc-edit input');
-  if (edit.kind === 'new') await newDocument(name, edit.group);
+  if (edit.kind === 'new') await newDocument(name, edit.group, edit.extension.slice(1));
   else {
     await renameDoc(edit.id, name, input);
     if (editing === edit && !edit.error && !edit.keep) { editing = null; renderDocs(); }
@@ -787,6 +795,67 @@ async function removeFolder(group) {
 }
 
 newButton.addEventListener('click', beginNewDraft);
+
+// 새 문서 형식 메뉴(HWP·XLSX·DOCX·Google에서 가져오기). 메뉴 버튼 패턴: Enter/Space/↓로 열고 ↑↓로 옮기고 Escape로 닫는다.
+const menuItems = () => [...newMenu.querySelectorAll('[role="menuitem"]')];
+function setMenu(open, { focus = 'first' } = {}) {
+  newMenu.hidden = !open;
+  newMenuButton.setAttribute('aria-expanded', String(open));
+  if (open) (focus === 'last' ? menuItems().at(-1) : menuItems()[0])?.focus();
+}
+newMenuButton.addEventListener('click', () => setMenu(newMenu.hidden));
+newMenuButton.addEventListener('keydown', event => {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setMenu(true, { focus: event.key === 'ArrowUp' ? 'last' : 'first' }); }
+});
+newMenu.addEventListener('keydown', event => {
+  const items = menuItems();
+  const at = items.indexOf(document.activeElement);
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMenu(false); newMenuButton.focus(); }
+  else if (event.key === 'ArrowDown') { event.preventDefault(); items[(at + 1) % items.length]?.focus(); }
+  else if (event.key === 'ArrowUp') { event.preventDefault(); items[(at - 1 + items.length) % items.length]?.focus(); }
+  else if (event.key === 'Tab') setMenu(false);
+});
+document.addEventListener('pointerdown', event => {
+  if (!newMenu.hidden && !event.target.closest?.('.new-group')) setMenu(false);
+});
+newMenu.addEventListener('click', event => {
+  const item = event.target.closest?.('[data-new]');
+  if (!item) return;
+  setMenu(false);
+  if (item.dataset.new === 'google') openImportDialog();
+  else beginNewDraft('.' + item.dataset.new);
+});
+
+// Google 공유 링크 가져오기. 선택한 그룹(새 문서와 같은 규칙)에 xlsx·docx·pptx 사본을 만든다.
+const importUrl = document.querySelector('#import-url');
+const importError = document.querySelector('#import-error');
+const importGo = document.querySelector('#import-go');
+const IMPORT_URL_ERRORS = { INVALID_URL: 'docs.google.com의 시트·문서·슬라이드 주소가 아닙니다',
+  GOOGLE_NOT_SHARED: '공유되지 않은 문서입니다 · "링크가 있는 모든 사용자"로 공유한 뒤 다시 시도하세요',
+  GOOGLE_REDIRECT_BLOCKED: 'Google 밖으로 넘어가는 주소는 받지 않습니다', GOOGLE_FETCH_FAILED: 'Google에서 받지 못했습니다',
+  GOOGLE_BAD_BYTES: '받은 파일이 문서 형식이 아닙니다', TOO_LARGE: '파일이 너무 큽니다(64MB 초과)' };
+function openImportDialog() {
+  importError.textContent = '';
+  importUrl.value = '';
+  importDialog.showModal();
+  importUrl.focus();
+}
+document.querySelector('#import-cancel').addEventListener('click', () => { importDialog.close(); newMenuButton.focus(); });
+document.querySelector('#import-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const target = createGroupFor([...groups, ...externalGroups], selectedGroupKey, current?.id);
+  importGo.disabled = true;
+  importError.textContent = '가져오는 중…';
+  try {
+    const created = await (await api('/api/office/import-url', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: importUrl.value.trim(), group: target }) })).json();
+    importDialog.close();
+    await loadDocs();
+    say(`${nameOf(created.id)} 가져옴 · 커밋 ${String(created.commit ?? '').slice(0, 7)}`);
+    await openDoc(created.id);
+  } catch (error) { importError.textContent = IMPORT_URL_ERRORS[error.message] || `가져오지 못했습니다: ${error.message}`; }
+  finally { importGo.disabled = false; }
+});
 document.addEventListener('pointerdown', event => {
   if (editing && !editing.pending && !event.target.closest('.doc-row[data-edit]')) pendingCancel = editing;
 }, true);

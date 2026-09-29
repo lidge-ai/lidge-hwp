@@ -1,7 +1,7 @@
 {
-  "name": "lidge-hwp",
+  "name": "jongi",
   "version": "0.1.0",
-  "description": "Local HWP/HWPX editor with verified MCP agent editing",
+  "description": "Local multi-format document workbench (HWP, Office, Numbers) with verified MCP agent editing",
   "license": "MIT",
   "engines": {
     "node": ">=26"

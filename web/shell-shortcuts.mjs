@@ -19,6 +19,6 @@ export function shellShortcutDecision(event, target = event.target) {
   // 시트·문서 편집기 안의 F2는 셀·글 편집 키다. 셸 이름 바꾸기로 가로채지 않는다(⌘⇧R은 그대로 동작).
   if (action === 'rename' && !event.metaKey && target?.closest?.('#office-host')) return { prevent: false, action: null };
   const inProtectedInput = target?.closest?.('.rename-input, .new-doc-row input');
-  const inDialog = target?.closest?.('dialog[open], [role="dialog"], [aria-modal="true"]');
+  const inDialog = target?.closest?.('dialog[open], [role="dialog"], [aria-modal="true"], [role="menu"]');
   return { prevent: true, action: inProtectedInput || inDialog ? null : action };
 }

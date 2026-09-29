@@ -1,8 +1,22 @@
-# LIDGE HWP
+# 종이 (Jongi)
 
-브라우저에서 HWP·HWPX를 편집하고, AI 에이전트가 같은 문서를 고칠 수 있는 로컬 작업대.
+로컬에서 여러 문서 형식을 여는 문서 작업대. HWP·HWPX부터 시트·문서·슬라이드 형식까지 편집하고, AI 에이전트가 같은 문서를 고칠 수 있다.
+제품 표시 이름만 종이(Jongi)로 바뀌었다. 저장소 이름(`lidge-hwp`), 환경 변수 `LIDGE_HWP_*`, 상태 경로 `~/.lidge-hwp`는 이름과 무관하게 그대로 쓴다.
 [rhwp](https://github.com/edwardkim/rhwp) 포크의 Studio·WASM·CLI와 문서 저장 서버를 한 저장소에 담았다.
 앱 코드는 MIT로 공개하며, 문서함은 저장소 밖에 따로 둔다.
+
+## 열고 고칠 수 있는 형식
+
+| 형식 | 편집 | 방식 |
+| --- | --- | --- |
+| HWP, HWPX | 편집 | rhwp Studio 편집기 |
+| XLSX | 편집 | 시트 편집기(FortuneSheet). 저장은 ExcelJS가 바뀐 셀만 원본 위에 덧쓴다 |
+| XLS, ODS, CSV, Numbers | 편집 | 시트 편집기. 열기·저장은 SheetJS가 맡는다 |
+| DOCX | 편집 | docx-editor. 손대지 않은 OOXML은 저장 때 보존한다 |
+| ODT, RTF, DOC | 편집 | LibreOffice로 DOCX로 바꿔 편집하고, 저장 때 원래 형식으로 되돌린다 |
+| Pages | 읽기 전용 | LibreOffice로 DOCX 사본을 만든다 |
+| PPTX, PPT, ODP, KEY | 미리보기 | LibreOffice가 만든 PDF를 pdf.js로 본다. PPTX 사본을 만들 수 있다 |
+| Google Sheets, Docs, Slides | 가져오기 | 공유 링크에서 XLSX·DOCX·PPTX로 가져온다. 가져온 문서는 로컬에서 편집하고 Google 문서로 다시 쓰지 않는다 |
 
 ## 할 수 있는 일
 
@@ -22,6 +36,9 @@
 
 필수 도구: Node.js 26 이상, npm, Git, Rust/Cargo, `wasm-pack`, Rust의
 `wasm32-unknown-unknown` 타깃. 빌드 중 의존성을 내려받으려면 인터넷 연결이 필요하다.
+`npm run build:office`는 시트·문서·슬라이드 편집기 번들을 만들고, Rust 없이도 된다.
+
+LibreOffice는 선택 사항이다. 없어도 HWP·HWPX·XLSX·DOCX 편집은 된다. ODT·RTF·DOC·Pages 열기, 슬라이드 미리보기, 형식 사본 만들기처럼 변환이 필요한 기능에 쓴다. 찾는 순서는 `LIDGE_HWP_SOFFICE` 환경 변수 → `/Applications/LibreOffice.app` → Codex 런타임에 딸린 LibreOfficeDev → `PATH`다. 앱에 LibreOffice를 번들하지 않으므로 별도 설치가 필요하다.
 
 ```sh
 git clone https://github.com/lidge-ai/lidge-hwp.git
@@ -29,15 +46,17 @@ cd lidge-hwp
 npm ci
 rustup target add wasm32-unknown-unknown
 npm run build:studio
+npm run build:office
 
 mkdir -p "$HOME/.lidge-hwp/docs"
 git -C "$HOME/.lidge-hwp/docs" init
 npm start
 ```
 
-[localhost:10500](http://localhost:10500/)에서 프로젝트를 만들고 HWP/HWPX 파일을 가져온다.
+[127.0.0.1:10500](http://127.0.0.1:10500/)에서 프로젝트를 만들고 HWP/HWPX 파일을 가져온다.
 문서함은 독립된 Git 저장소여야 한다. 저장하면 상태줄에 커밋 ID가 표시된다.
 새 문서 버튼이나 ⌥⌘N으로 빈 HWP를 만듭니다. 선택한 그룹, 열린 문서의 그룹, 기본 문서함 순서로 위치를 정합니다. 이름을 생략하면 새 문서.hwp, 새 문서 2.hwp 순서로 중복 없이 저장하고 즉시 이력에 커밋합니다. ⌘N은 Chrome에서 새 창을 여는 예약 키이므로 버튼이나 ⌥⌘N을 쓰세요.
+새 문서 버튼 옆 ▾ 메뉴에서 스프레드시트(XLSX)·워드 문서(DOCX)를 같은 방식으로 만들고, "Google에서 가져오기"로 공유 링크의 시트·문서·슬라이드를 가져온다.
 편집기 안에 포커스가 있어도 F2·⌘⇧R(이름 바꾸기), ⌘⇧C(경로 복사), ⌥⌘N(새 문서)을 문서함으로 보냅니다. ⌘N도 페이지에 전달되는 환경에서는 새 문서로 처리합니다.
 서버 재시작 전에는 편집을 저장하고, 재시작 후에는 문서를 다시 연다.
 
@@ -191,6 +210,7 @@ Rust를 바꿨다면 WASM·Studio와 CLI를 함께 빌드해야 한다.
 ## 개발과 라이선스
 
 `npm test`는 앱 테스트를 실행한다. 실문서 통합 검증에는 외부 fixture 경로가 필요하다:
+`npm run test:soffice`는 LibreOffice를 실제로 쓰는 통합 테스트(ODT·RTF 편집, 슬라이드 PDF 변환)다. LibreOffice가 없으면 실패하며 skip되지 않는다.
 `LIDGE_HWP_KU_FIXTURE`(HWPX), `LIDGE_HWP_KU_HWP_FIXTURE`(HWP), `LIDGE_HWP_SIG_FIXTURE`(중첩 표 HWP).
 설정하지 않은 통합 테스트는 skip된다. 개인 문서·기록은 공개본에 포함하지 않는다.
 vendored 엔진의 전체 회귀 테스트에 필요한 일부 원본 문서도 제외되어 있으므로,
