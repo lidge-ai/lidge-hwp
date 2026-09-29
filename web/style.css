@@ -75,7 +75,8 @@ ul { list-style: none; margin: 0; padding: 0; }
 button { cursor: pointer; font: inherit; border-radius: .3rem; }
 button:focus-visible { outline: 3px solid #1266a3; outline-offset: 2px; }
 button:disabled { cursor: not-allowed; opacity: .5; }
-main { min-width: 0; background: white; }
+/* 셸의 main만. 편집기 번들(FortuneSheet 등)도 main 요소를 쓰므로 전역 main 규칙은 두지 않는다. */
+.layout > main { min-width: 0; background: white; }
 #save { flex: none; min-width: 4.5rem; min-height: 2rem; border: 0; color: white; background: #165a91; }
 #new-doc { flex:none; min-height:2rem; padding:0 .7rem; border:1px solid #165a91; background:white; color:#165a91; }
 #docs .search-empty, #external-docs .search-empty { padding: .6rem .5rem; font-size: .8rem; color: #5b6573; }
@@ -84,7 +85,7 @@ main { min-width: 0; background: white; }
 #copy-path { flex: none; min-height: 2rem; padding: 0 .65rem; border: 1px solid #b8c5d3; color: #165a91; background: white; }
 #studio { flex: 1; min-height: 0; }
 #studio > iframe { display: block; } /* 인라인 iframe의 기준선 틈(4px)이 페이지를 창보다 키우지 않게 */
-main { position: relative; }
+.layout > main { position: relative; }
 body:not([data-shell-state="open"]) #studio { visibility: hidden; position: absolute; inset: 0; pointer-events: none; }
 body[data-shell-state="open"] #shell-panel { display: none; }
 #shell-panel { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .4rem; padding: 1rem; text-align: center; color: #3c4858; }
@@ -92,3 +93,10 @@ body[data-shell-state="open"] #shell-panel { display: none; }
 #shell-actions { display: flex; align-items: center; gap: .6rem; font-size: .8rem; }
 #shell-actions button { border: 1px solid #b8c5d3; background: white; color: #165a91; min-height: 2rem; padding: 0 .6rem; }
 @media (max-width: 700px) { .layout { display: flex; flex-direction: column; } aside { flex: none; max-height: 9rem; border-right: 0; border-bottom: 1px solid #d7dce2; } body[data-sidebar="collapsed"] aside { max-height: none; } #sidebar-resizer { display: none; } .layout > main { flex: 1; } h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } #filename { max-width: 45%; } header { flex-wrap: wrap; gap: .35rem; } #status { order: 5; flex-basis: 100%; white-space: normal; overflow: visible; min-height: 1rem; } #project-add, #docs-refresh, #folder-add { min-width: 2.75rem; min-height: 2.75rem; } }
+/* 오피스 편집기(시트·문서·슬라이드). HWP 편집기(#studio)는 숨기기만 하고 그대로 둔다. */
+body[data-editor-family]:not([data-editor-family="hwp"]) #studio { display: none; }
+#office-host { flex: 1; min-height: 0; position: relative; }
+#office-host[hidden] { display: none; }
+body[data-shell-state="error"] #office-host, body[data-shell-state="empty"] #office-host { display: none; }
+#office-host > .office-editor { position: absolute; inset: 0; overflow: hidden; }
+.office-pending { display: grid; place-items: center; height: 100%; color: #5b6573; }

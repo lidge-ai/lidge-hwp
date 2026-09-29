@@ -5,13 +5,16 @@ import { shellShortcutDecision } from '/shell-shortcuts.mjs';
 import { dispatchHostEvent } from '/host-shortcuts.mjs';
 import { initSidebar } from '/sidebar.mjs';
 import { normalizeNewDocName } from '/doc-name.mjs';
-import { ACCEPT, familyOf, formatOf, labelOf } from '/formats.mjs';
+import { ACCEPT, familyOf, formatOf, isEditable, labelOf, needsConversion } from '/formats.mjs';
+import { createOfficeEditor } from '/editors/office.mjs';
+import { startOfficeChannel } from '/editors/office-channel.mjs';
 import { groupDocs, groupKeyOf, createGroupFor, matchDoc, renderProjects, readCollapsedGroups, writeCollapsedGroups, bindListKeys, displayName } from '/projects.mjs';
 
 initSidebar();
 
 const docFilter = document.querySelector('#doc-filter');
 const studioHost = document.querySelector('#studio');
+const officeHost = document.querySelector('#office-host');
 const refreshButton = document.querySelector('#docs-refresh');
 const projectAdd = document.querySelector('#project-add');
 const folderAdd = document.querySelector('#folder-add');
@@ -39,7 +42,8 @@ function setShellState(state) {
   // 첫 화면은 index.html의 #studio inert로 막는다(스크립트 전 입력 차단). 편집기가 생기면 입력 차단은 iframe inert가 맡으므로
   // 감싸는 #studio의 inert는 푼다. 남겨 두면 iframe inert를 풀어도 편집기가 계속 입력을 받지 못한다.
   if (studio) {
-    studio.element.inert = state.kind !== 'open' || state.followPending === true;
+    // 오피스 편집기가 열려 있으면 숨겨진 HWP 편집기는 입력을 받지 않는다.
+    studio.element.inert = state.kind !== 'open' || state.followPending === true || Boolean(current?.editor);
     studioHost.inert = false;
   }
   shellMessage.textContent = state.reason === 'STUDIO_FAILED' ? '편집기를 시작하지 못했습니다'
@@ -56,6 +60,17 @@ shellRetry.addEventListener('click', () => { if (shellState.attemptedId) void op
 shellReload.addEventListener('click', () => location.reload());
 setShellState(shellState);
 let current = null;
+// 지금 붙어 있는 오피스 편집기(#office-host). HWP 문서로 바꾸거나 다른 오피스 문서를 열 때 정리한다.
+let officeEditor = null;
+const editorOf = tab => tab?.editor ?? studio;
+function showEditorFamily(family) {
+  document.body.dataset.editorFamily = family;
+  officeHost.hidden = family === 'hwp';
+}
+function dropOfficeEditor() {
+  try { officeEditor?.destroy(); } catch { /* 이미 떨어진 편집기 */ }
+  officeEditor = null;
+}
 let saving = false;
 let agentLocked = false;
 let opening = 0;                   // 줄에 선 openDoc 수. AI 전환 판정(canFollow)이 본다
@@ -114,7 +129,7 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
   }
   if (saving) { if (agent) throw new Error('SAVING'); return false; }
   if (current?.id === id) { if (agent) throw new Error('ALREADY_OPEN'); return false; }
-  if (current && (await studio.getDocumentState()).dirty) {
+  if (current && (await editorOf(current).getDocumentState()).dirty) {
     if (agent) throw new Error('DIRTY'); // AI 전환은 확인 창을 띄우지 않는다
     if (!confirm('저장하지 않은 편집을 버리고 다른 문서를 여시겠습니까?')) return false;
   }
@@ -146,14 +161,26 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
     const etag = response.headers.get('ETag');
     const format = response.headers.get('X-Document-Format');
     if (!etag || !format || formatOf(id) !== format) throw new Error('Invalid document response');
-    // HWP/HWPX가 아닌 형식은 오피스 편집기가 맡는다. 붙기 전에는 임대를 잡지 않고 멈춘다.
-    if (familyOf(format) !== 'hwp') throw new Error('EDITOR_PENDING');
+    const family = familyOf(format);
     const leaseResponse = await api('/api/tabs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(reservation ? { docId: id, reservation } : { docId: id }) });
     const { lease } = await leaseResponse.json();
-    next = { id, etag, format, lease, events: null, stopAgent: null };
+    next = { id, etag, format, lease, events: null, stopAgent: null, editor: null };
     // loadFile이 끝날 때까지 SSE를 열지 않는다. 그동안 서버는 이 탭을 "여는 중"으로 보고 runner는 붙기를 기다린다.
-    await studio.loadFile(bytes, id.split('/').at(-1));
+    if (family === 'hwp') {
+      await studio.loadFile(bytes, id.split('/').at(-1));
+      dropOfficeEditor();
+      showEditorFamily('hwp');
+    } else {
+      // HWP가 아닌 형식: 형식 가족별 편집기(시트·문서·슬라이드)를 #office-host에 붙인다. HWP 편집기는 그대로 둔다.
+      dropOfficeEditor();
+      showEditorFamily(family);
+      officeEditor = await createOfficeEditor(officeHost, format, { id, onSaveShortcut: () => void save() });
+      next.editor = officeEditor;
+      const source = needsConversion(format)
+        ? await (await api(`/api/office/editable/${encodeURIComponent(id)}`)).arrayBuffer() : bytes;
+      await officeEditor.loadFile(source, id.split('/').at(-1));
+    }
     const tab = next;
     tab.events = new EventSource(`/api/events?lease=${encodeURIComponent(lease)}`);
     tab.connected = new Promise((resolve, reject) => {
@@ -172,7 +199,31 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
     tab.connected.catch(() => {});
     tab.events.addEventListener('error', () => { saveButton.disabled = true; say('연결이 끊겼습니다. 문서를 다시 여세요.'); });
     // 같은 틱에 리스너를 붙이므로 첫 SSE 이벤트를 놓치지 않는다.
-    tab.stopAgent = startAgentChannel({ editor: studio, events: tab.events, docId: id, lease,
+    const followHooks = {
+      canFollow: async () => saving ? 'SAVING' : opening > 0 ? 'BUSY'
+        : (await editorOf(tab).getDocumentState()).dirty ? 'DIRTY' : null,
+      onFollow: (targetId, token) => openDoc(targetId, { reservation: token, agent: true }),
+      onFollowEnd: msg => {
+        if (current?.lease !== lease) return;
+        if (msg.completion === 'committed') return say(`AI 편집 저장됨 · ${nameOf(id)}${msg.commit ? ' · 커밋 ' + msg.commit : ''}`);
+        if (msg.completion === 'unknown') return say(`AI 작업 결과 확인 필요(${msg.error ?? '알 수 없음'}) · 이 문서에 남습니다`);
+        if (msg.completion === 'none') return openDoc(msg.from, { restoreFrom: lease, reason: msg.error ?? '변경 없음' });
+      },
+    };
+    if (tab.editor) tab.stopAgent = startOfficeChannel({ events: tab.events, docId: id, lease, showStatus: say, setSaveLocked,
+      isBusy: () => saving && current === tab, ...followHooks,
+      onChanged: async () => {
+        if (current !== tab) return;
+        if ((await tab.editor.getDocumentState()).dirty) { say('AI가 이 문서를 바꿨습니다 · 저장하지 않은 편집이 있어 다시 읽지 않았습니다'); return; }
+        const fresh = await api(docUrl(id), { cache: 'no-store' });
+        const freshBytes = await fresh.arrayBuffer();
+        tab.etag = fresh.headers.get('ETag');
+        const src = needsConversion(tab.format)
+          ? await (await api(`/api/office/editable/${encodeURIComponent(id)}`)).arrayBuffer() : freshBytes;
+        await tab.editor.loadFile(src, id.split('/').at(-1));
+        say('AI 편집을 불러왔습니다');
+      } });
+    else tab.stopAgent = startAgentChannel({ editor: studio, events: tab.events, docId: id, lease,
       getDiskSha: () => tab.etag.slice(1, -1),
       setDiskSha: sha => { tab.etag = `"${sha}"`; },
       showStatus: say, setSaveLocked,
@@ -188,22 +239,16 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
         return saved;
       },
       // agent.follow 판정. 저장 중·다른 전환 중·저장 안 한 편집이면 거절 코드, 아니면 null(수락).
-      canFollow: async () => saving ? 'SAVING' : opening > 0 ? 'BUSY'
-        : (await studio.getDocumentState()).dirty ? 'DIRTY' : null,
-      onFollow: (targetId, token) => openDoc(targetId, { reservation: token, agent: true }),
-      onFollowEnd: msg => {
-        if (current?.lease !== lease) return;
-        if (msg.completion === 'committed') return say(`AI 편집 저장됨 · ${nameOf(id)}${msg.commit ? ' · 커밋 ' + msg.commit : ''}`);
-        if (msg.completion === 'unknown') return say(`AI 작업 결과 확인 필요(${msg.error ?? '알 수 없음'}) · 이 문서에 남습니다`);
-        if (msg.completion === 'none') return openDoc(msg.from, { restoreFrom: lease, reason: msg.error ?? '변경 없음' });
-      },
+      ...followHooks,
     });
     current = next;
     if (agent && !restore) setSaveLocked(true);
     syncCopyPathButton();
     setShellState({ kind: 'open', followPending: agent && !restore });
+    // 오피스 편집기는 숨긴 채 붙였으므로 보이게 된 뒤 크기를 다시 재게 한다(FortuneSheet 캔버스는 창 resize를 듣는다).
+    if (tab.editor) requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
     filename.textContent = nameOf(id); filename.title = id;
-    saveButton.disabled = agentLocked;
+    saveButton.disabled = agentLocked || !isEditable(format);
     for (const button of document.querySelectorAll('#docs button[data-id], #external-docs button[data-id]')) button.setAttribute('aria-current', String(button.dataset.id === id));
     // 방금 연 문서의 그룹이 접혀 있으면 펼치고 활성 버튼이 보이게 한다.
     expandGroup(groupKeyOf(id));
@@ -218,6 +263,7 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
   } catch (error) {
     // AI 전환이면 runner가 FOLLOW_LOAD_FAILED로 알아채고, followSwitch가 예약을 돌려준다.
     if (next && current !== next) await release(next).catch(() => {});
+    if (next?.editor && current !== next) { dropOfficeEditor(); showEditorFamily('hwp'); }
     if (!current) {
       syncCopyPathButton();
       // 이전 문서는 이미 반납했다. 화면에 남은 옛 문서를 편집·저장할 수 없게 덮고, 목록에서 다시 고르게 한다.
@@ -239,26 +285,37 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
 
 async function save() {
   if (!current || saving || agentLocked) return;
+  if (!isEditable(current.format)) { say(`${labelOf(current.format)}는 미리보기 전용입니다 · 사본으로 변환해 편집하세요`); return; }
   saving = true;
   saveButton.disabled = true;
   const tab = current;
   try {
     say('저장 중');
-    const exported = await studio.lidge.request('exportWithReport', { format: tab.format });
+    const exported = tab.editor ? await tab.editor.exportWithReport({ format: tab.format })
+      : await studio.lidge.request('exportWithReport', { format: tab.format });
     if (exported.contentLoss.count !== 0 || exported.contentLoss.losses.length !== 0) throw new Error('CONTENT_LOSS');
+    // 오피스 형식이 지키지 못하는 것(서식·수식 등)이 있으면 탭마다 한 번 확인을 받는다.
+    const warnings = exported.contentLoss.warnings ?? [];
+    const unseen = warnings.filter(code => !tab.acceptedWarnings?.has(code));
+    if (unseen.length) {
+      const lines = tab.editor?.describeWarnings?.(unseen) ?? unseen;
+      if (!confirm(`${labelOf(tab.format)}로 저장하면:\n\n${lines.map(line => '· ' + line).join('\n')}\n\n저장할까요?`)) { say('저장 취소'); return; }
+      tab.acceptedWarnings = new Set([...(tab.acceptedWarnings ?? []), ...unseen]);
+    }
     const report = btoa(JSON.stringify(exported.contentLoss));
     const response = await api(docUrl(tab.id), { method: 'PUT', headers: {
       'Content-Type': 'application/octet-stream', 'If-Match': tab.etag,
       'X-Lease': tab.lease, 'X-Document-Format': tab.format,
       'X-Content-Loss-Report': report,
+      ...(exported.sourceFormat ? { 'X-Source-Format': exported.sourceFormat } : {}),
     }, body: exported.bytes });
     const result = await response.json();
     tab.etag = `"${result.sha256}"`;
     say('저장됨');
-    try { await studio.notifySaved(tab.id.split('/').at(-1)); }
+    try { await (tab.editor ?? studio).notifySaved(tab.id.split('/').at(-1)); }
     catch (error) { say(`파일 커밋 ${result.commit} 완료, 편집기 상태 갱신 실패: ${error.message}`); }
   } catch (error) { say(`저장 실패: ${error.message}`); }
-  finally { saving = false; saveButton.disabled = !current || agentLocked; }
+  finally { saving = false; saveButton.disabled = !current || agentLocked || !isEditable(current.format); }
 }
 
 // 프로젝트 그룹 상태(wp5). 접힌 그룹 키는 localStorage에, 필터는 세션에만 둔다.
@@ -599,7 +656,7 @@ function renameDoc(id, name, input) {
   };
   const run = openQueue.then(async () => {
     if (saving || agentLocked || current?.id !== id) throw new Error('AGENT_BUSY');
-    if ((await studio.getDocumentState()).dirty
+    if ((await editorOf(current).getDocumentState()).dirty
         && !confirm('저장하지 않은 편집을 버리고 이름을 바꾸시겠습니까?')) {
       if (editing) { editing.pending = false; editing.keep = true; renderDocs(); focusEdit(); }
       return;
