@@ -15,6 +15,8 @@ const fakeGoogle = async url => {
 
 await withBrowser({ files: ['P/a.hwp'], office: { fetchImpl: fakeGoogle } }, async ({ cdp, docs }) => {
   const page = source => cdp.eval(source); // justified: CDP Runtime.evaluate inside the headless test browser, not dynamic code in this process
+  // 셸 모듈이 끝까지 실행된 뒤(편집기 준비 표시)에 메뉴를 누른다. 정적 HTML만으로는 리스너가 아직 없다.
+  await until(() => page("return document.body.dataset.studioReady === 'true';"), 30000);
   // 메뉴: 버튼으로 열고 Escape로 닫으면 포커스가 버튼으로 돌아온다.
   await page("document.querySelector('#new-menu').click();");
   assert.equal(await page("return document.querySelector('#new-menu').getAttribute('aria-expanded');"), 'true');
