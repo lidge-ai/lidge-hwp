@@ -75,7 +75,7 @@ let saving = false;
 let agentLocked = false;
 let opening = 0;                   // 줄에 선 openDoc 수. AI 전환 판정(canFollow)이 본다
 let openQueue = Promise.resolve(); // 사람 클릭과 AI 전환(agent.follow)을 한 줄로 세운다
-const setSaveLocked = on => { agentLocked = on; saveButton.disabled = on || saving || !current; };
+const setSaveLocked = on => { agentLocked = on; syncSaveButton(); };
 function syncCopyPathButton() { copyPathButton.disabled = !current; }
 
 function say(message, kind = /실패|오류|끊겼|확인 불가|격리/.test(message) ? 'error' : 'normal') {
@@ -175,7 +175,7 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
       // HWP가 아닌 형식: 형식 가족별 편집기(시트·문서·슬라이드)를 #office-host에 붙인다. HWP 편집기는 그대로 둔다.
       dropOfficeEditor();
       showEditorFamily(family);
-      officeEditor = await createOfficeEditor(officeHost, format, { id, onSaveShortcut: () => void save() });
+      officeEditor = await createOfficeEditor(officeHost, format, { id, onSaveShortcut: () => void save(), notify: say });
       next.editor = officeEditor;
       const source = needsConversion(format)
         ? await (await api(`/api/office/editable/${encodeURIComponent(id)}`)).arrayBuffer() : bytes;
@@ -248,7 +248,7 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
     // 오피스 편집기는 숨긴 채 붙였으므로 보이게 된 뒤 크기를 다시 재게 한다(FortuneSheet 캔버스는 창 resize를 듣는다).
     if (tab.editor) requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
     filename.textContent = nameOf(id); filename.title = id;
-    saveButton.disabled = agentLocked || !isEditable(format);
+    syncSaveButton();
     for (const button of document.querySelectorAll('#docs button[data-id], #external-docs button[data-id]')) button.setAttribute('aria-current', String(button.dataset.id === id));
     // 방금 연 문서의 그룹이 접혀 있으면 펼치고 활성 버튼이 보이게 한다.
     expandGroup(groupKeyOf(id));
@@ -285,7 +285,11 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
 
 async function save() {
   if (!current || saving || agentLocked) return;
-  if (!isEditable(current.format)) { say(`${labelOf(current.format)}는 미리보기 전용입니다 · 사본으로 변환해 편집하세요`); return; }
+  if (!isEditable(current.format)) {
+    // 편집기가 있는 읽기 전용 형식(Pages)은 편집한 내용을 DOCX 사본으로 남긴다.
+    if (current.editor?.family === 'doc') return saveCopy('docx', { fromEditor: true });
+    say(`${labelOf(current.format)}는 미리보기 전용입니다 · 사본으로 변환해 편집하세요`); return;
+  }
   saving = true;
   saveButton.disabled = true;
   const tab = current;
@@ -315,7 +319,34 @@ async function save() {
     try { await (tab.editor ?? studio).notifySaved(tab.id.split('/').at(-1)); }
     catch (error) { say(`파일 커밋 ${result.commit} 완료, 편집기 상태 갱신 실패: ${error.message}`); }
   } catch (error) { say(`저장 실패: ${error.message}`); }
-  finally { saving = false; saveButton.disabled = !current || agentLocked || !isEditable(current.format); }
+  finally { saving = false; syncSaveButton(); }
+}
+
+// 저장 버튼: 편집 가능한 형식은 "저장", 편집기가 있는 읽기 전용 형식(Pages)은 "DOCX 사본", 미리보기 전용은 끔.
+function syncSaveButton() {
+  const copyOnly = current && !isEditable(current.format) && current.editor?.family === 'doc';
+  saveButton.textContent = copyOnly ? 'DOCX 사본' : '저장';
+  saveButton.disabled = !current || agentLocked || saving || (!isEditable(current.format) && !copyOnly);
+}
+
+// 원본 옆에 다른 형식 사본을 만든다. fromEditor면 편집기 내보내기 바이트를, 아니면 서버 변환을 쓴다.
+async function saveCopy(target, { fromEditor = false } = {}) {
+  if (!current || saving) return;
+  const tab = current;
+  saving = true; syncSaveButton();
+  try {
+    say(`${labelOf(target)} 사본 만드는 중`);
+    const bytes = fromEditor ? (await tab.editor.exportWithReport({ format: target })).bytes : new Uint8Array(0);
+    const response = await api('/api/office/copy', { method: 'POST', body: bytes, headers: {
+      'Content-Type': 'application/octet-stream', 'X-Doc-Id': encodeURIComponent(tab.id), 'X-Target-Format': target } });
+    const created = await response.json();
+    await tab.editor?.notifySaved?.();
+    saving = false;
+    await loadDocs();
+    say(`${nameOf(created.id)} 사본을 만들었습니다${created.commit ? ' · 커밋 ' + String(created.commit).slice(0, 7) : ''}`);
+    await openDoc(created.id);
+  } catch (error) { say(`사본 만들기 실패: ${error.message}`); }
+  finally { saving = false; syncSaveButton(); }
 }
 
 // 프로젝트 그룹 상태(wp5). 접힌 그룹 키는 localStorage에, 필터는 세션에만 둔다.

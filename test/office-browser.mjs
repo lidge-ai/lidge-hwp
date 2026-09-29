@@ -7,6 +7,9 @@ import { promisify } from 'node:util';
 import ExcelJS from 'exceljs';
 import * as XLSX from 'xlsx';
 import ZAHL from 'xlsx/dist/xlsx.zahl.mjs';
+import { blankDocx } from '../lib/office/blank.mjs';
+import { appendParagraph, documentText } from '../lib/office/docx-text.mjs';
+import { convert } from '../lib/office/soffice.mjs';
 import { withBrowser, until, expect as assert } from './browser-shell-helper.mjs';
 
 const git = promisify(execFile);
@@ -37,6 +40,8 @@ await withBrowser({ files: ['메모.hwp'] }, async ({ cdp, docs }) => {
   await writeFile(join(docs, '예산.xlsx'), await styledXlsx());
   await writeFile(join(docs, '가계부.numbers'), numbersFile());
   await writeFile(join(docs, '표.csv'), '이름,점수\n가,1\n나,2\n');
+  await writeFile(join(docs, '회의록.docx'), appendParagraph(blankDocx(), '첫 문단'));
+  await writeFile(join(docs, '초안.odt'), await convert(appendParagraph(blankDocx(), 'ODT 문단'), { from: 'docx', to: 'odt' }));
   await git('git', ['-C', docs, 'add', '.']);
   await git('git', ['-C', docs, '-c', 'user.name=Test', '-c', 'user.email=test@local.invalid', 'commit', '-qm', 'office seed']);
   await page("document.querySelector('#docs-refresh').click();");
@@ -45,7 +50,7 @@ await withBrowser({ files: ['메모.hwp'] }, async ({ cdp, docs }) => {
   const open = async id => {
     await page('document.querySelector(' + JSON.stringify('.doc[data-id="' + id + '"]') + ').click();');
     await until(() => page("return document.body.dataset.shellState === 'open' && document.querySelector('#filename').title === " + JSON.stringify(id) + ";"), 30000);
-    await until(() => page("return document.querySelectorAll('#office-host canvas').length > 0;"), 30000);
+    await until(() => page("return document.querySelectorAll('#office-host canvas').length > 0 || !!document.querySelector('#office-host .office-doc [contenteditable]');"), 30000);
     await new Promise(r => setTimeout(r, 800));
   };
   // 셀 좌표(0부터) 가운데를 두 번 눌러 편집을 열고 글자를 넣은 뒤 Enter.
@@ -110,5 +115,35 @@ await withBrowser({ files: ['메모.hwp'] }, async ({ cdp, docs }) => {
   await until(() => page("return document.body.dataset.shellState === 'open' && document.body.dataset.editorFamily === 'hwp' && document.querySelector('#office-host').hidden && !document.querySelector('#office-host canvas');"), 30000);
   await cdp.shot(join(OUT, '05-back-to-hwp.png'));
   console.log('PASS switching back to HWP restores the rhwp editor');
-});
 
+  // 5. docx: 열기 → 본문 끝에 입력 → 저장 → 디스크 DOCX 본문 확인
+  const typeDoc = async text => {
+    const spot = await page("const el = document.querySelector('#office-host .office-doc'); const pages = [...el.querySelectorAll('*')].filter(n => { const r = n.getBoundingClientRect(); return r.width > 400 && r.height > 500 && getComputedStyle(n).backgroundColor === 'rgb(255, 255, 255)'; }); const p = pages.at(-1) ?? el; const r = p.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + 110) };");
+    for (const type of ['mousePressed', 'mouseReleased']) await cdp.send('Input.dispatchMouseEvent', { type, x: spot.x, y: spot.y, button: 'left', clickCount: 1 });
+    await new Promise(r => setTimeout(r, 300));
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'End', code: 'End', windowsVirtualKeyCode: 35, modifiers: 4 });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'End', code: 'End', windowsVirtualKeyCode: 35, modifiers: 4 });
+    await cdp.send('Input.insertText', { text });
+    await new Promise(r => setTimeout(r, 500));
+  };
+  await open('회의록.docx');
+  await new Promise(r => setTimeout(r, 1500));
+  await cdp.shot(join(OUT, '06-docx-open.png'));
+  await typeDoc(' 추가한 문장');
+  await cdp.shot(join(OUT, '07-docx-edited.png'));
+  assert.equal(await save(), '저장됨');
+  assert.match(documentText(await readFile(join(docs, '회의록.docx'))), /추가한 문장/);
+  assert.equal(await lastCommit('회의록.docx'), 'Edit 회의록.docx [human]');
+  console.log('PASS docx open/edit/save');
+
+  // 6. odt: LibreOffice로 docx로 열고 저장하면 다시 odt로 되돌린다(경고 동의)
+  await open('초안.odt');
+  await new Promise(r => setTimeout(r, 1500));
+  await typeDoc(' 고친 부분');
+  assert.equal(await save(), '저장됨');
+  assert.ok(dialogs.some(message => message.includes('LibreOffice')), 'odt save asks for consent');
+  const odtBack = await convert(await readFile(join(docs, '초안.odt')), { from: 'odt', to: 'docx' });
+  assert.match(documentText(odtBack), /고친 부분/);
+  await cdp.shot(join(OUT, '08-odt-saved.png'));
+  console.log('PASS odt open(as docx)/edit/save(back to odt)');
+});
