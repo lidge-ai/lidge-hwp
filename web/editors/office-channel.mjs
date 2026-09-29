@@ -49,6 +49,7 @@ export function startOfficeChannel({ events, docId, lease, showStatus, setSaveLo
   return async () => {
     if (isBusy()) throw Object.assign(new Error('AGENT_BUSY'), { code: 'AGENT_BUSY' });
     stopped = true;
+    // 떠나는 채널이 끊김 때 건 저장 잠금은 셸 전역이라, 풀지 않으면 다음 문서로 넘어간다(HWP agent-channel과 같게).
+    setSaveLocked(false);
   };
 }
-

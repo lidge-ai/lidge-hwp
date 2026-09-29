@@ -1,4 +1,5 @@
 import { startAgentChannel } from '/agent-channel.mjs';
+import { bindSaveShortcut } from '/shortcuts.mjs';
 import { followSwitch, restoreSwitch } from '/follow-switch.mjs';
 import { copyPath } from '/copy-path.mjs';
 import { shellShortcutDecision } from '/shell-shortcuts.mjs';
@@ -100,6 +101,7 @@ const docUrl = (id) => `/api/docs/${encodeURIComponent(id)}`;
 async function release(tab) {
   // 에이전트 작업 중이거나 격리된 탭이면 AGENT_BUSY/LEASE_ISOLATED를 던진다. openDocNow가 전환을 멈춘다.
   await tab.stopAgent?.();
+  tab.retired = true; // 배경 재연결을 멈춘다
   tab.events?.close();
   await fetch(`/api/tabs/${encodeURIComponent(tab.lease)}`, { method: 'DELETE' });
 }
@@ -132,7 +134,8 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
     return false;
   }
   if (saving) { if (agent) throw new Error('SAVING'); return false; }
-  if (current?.id === id) { if (agent) throw new Error('ALREADY_OPEN'); return false; }
+  // 연결이 끊긴 탭은 같은 문서를 다시 열어 새 lease로 복구할 수 있다(편집이 있으면 아래 confirm).
+  if (current?.id === id && !current.disconnected) { if (agent) throw new Error('ALREADY_OPEN'); return false; }
   if (current && (await editorOf(current).getDocumentState()).dirty) {
     if (agent) throw new Error('DIRTY'); // AI 전환은 확인 창을 띄우지 않는다
     if (!confirm('저장하지 않은 편집을 버리고 다른 문서를 여시겠습니까?')) return false;
@@ -186,65 +189,7 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
       await officeEditor.loadFile(source, id.split('/').at(-1));
     }
     const tab = next;
-    tab.events = new EventSource(`/api/events?lease=${encodeURIComponent(lease)}`);
-    tab.connected = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => finish(new Error('SSE_HELLO_TIMEOUT')), 5000);
-      const hello = () => finish(null);
-      const failed = () => finish(new Error('SSE_CONNECT_FAILED'));
-      function finish(error) {
-        clearTimeout(timer);
-        tab.events.removeEventListener('hello', hello);
-        tab.events.removeEventListener('error', failed);
-        if (error) reject(error); else resolve();
-      }
-      tab.events.addEventListener('hello', hello, { once: true });
-      tab.events.addEventListener('error', failed, { once: true });
-    });
-    tab.connected.catch(() => {});
-    tab.events.addEventListener('error', () => { saveButton.disabled = true; say('연결이 끊겼습니다. 문서를 다시 여세요.'); });
-    // 같은 틱에 리스너를 붙이므로 첫 SSE 이벤트를 놓치지 않는다.
-    const followHooks = {
-      canFollow: async () => saving ? 'SAVING' : opening > 0 ? 'BUSY'
-        : (await editorOf(tab).getDocumentState()).dirty ? 'DIRTY' : null,
-      onFollow: (targetId, token) => openDoc(targetId, { reservation: token, agent: true }),
-      onFollowEnd: msg => {
-        if (current?.lease !== lease) return;
-        if (msg.completion === 'committed') return say(`AI 편집 저장됨 · ${nameOf(id)}${msg.commit ? ' · 커밋 ' + msg.commit : ''}`);
-        if (msg.completion === 'unknown') return say(`AI 작업 결과 확인 필요(${msg.error ?? '알 수 없음'}) · 이 문서에 남습니다`);
-        if (msg.completion === 'none') return openDoc(msg.from, { restoreFrom: lease, reason: msg.error ?? '변경 없음' });
-      },
-    };
-    if (tab.editor) tab.stopAgent = startOfficeChannel({ events: tab.events, docId: id, lease, showStatus: say, setSaveLocked,
-      isBusy: () => saving && current === tab, ...followHooks,
-      onChanged: async () => {
-        if (current !== tab) return;
-        if ((await tab.editor.getDocumentState()).dirty) { say('AI가 이 문서를 바꿨습니다 · 저장하지 않은 편집이 있어 다시 읽지 않았습니다'); return; }
-        const fresh = await api(docUrl(id), { cache: 'no-store' });
-        const freshBytes = await fresh.arrayBuffer();
-        tab.etag = fresh.headers.get('ETag');
-        const src = needsConversion(tab.format)
-          ? await (await api(`/api/office/editable/${encodeURIComponent(id)}`)).arrayBuffer() : freshBytes;
-        await tab.editor.loadFile(src, id.split('/').at(-1));
-        say('AI 편집을 불러왔습니다');
-      } });
-    else tab.stopAgent = startAgentChannel({ editor: studio, events: tab.events, docId: id, lease,
-      getDiskSha: () => tab.etag.slice(1, -1),
-      setDiskSha: sha => { tab.etag = `"${sha}"`; },
-      showStatus: say, setSaveLocked,
-      putDocument: async (docId, body, meta) => {
-        const response = await api(docUrl(docId), { method: 'PUT', body, headers: {
-          'Content-Type': 'application/octet-stream', 'If-Match': `"${meta.ifMatch}"`,
-          'X-Lease': meta.lease, 'X-Document-Format': meta.format,
-          'X-Content-Loss-Report': btoa(JSON.stringify(meta.contentLoss)),
-          'X-Agent-Request-Id': meta.agentRequestId,
-        } });
-        const saved = await response.json();
-        tab.etag = `"${saved.sha256}"`;
-        return saved;
-      },
-      // agent.follow 판정. 저장 중·다른 전환 중·저장 안 한 편집이면 거절 코드, 아니면 null(수락).
-      ...followHooks,
-    });
+    connectTab(tab);
     current = next;
     if (agent && !restore) setSaveLocked(true);
     syncCopyPathButton();
@@ -289,8 +234,135 @@ async function switchTo(id, { reservation = null, agent = false, rethrow = false
   }
 }
 
+// 탭의 SSE와 에이전트 채널을 붙인다. 처음 열 때와 끊긴 연결을 다시 붙일 때(reconnect) 같은 경로를 쓴다.
+function connectTab(tab) {
+  const { id, lease } = tab;
+  tab.events = new EventSource(`/api/events?lease=${encodeURIComponent(lease)}`);
+  tab.connected = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => finish(new Error('SSE_HELLO_TIMEOUT')), 5000);
+    const hello = () => finish(null);
+    const failed = () => finish(new Error('SSE_CONNECT_FAILED'));
+    function finish(error) {
+      clearTimeout(timer);
+      tab.events.removeEventListener('hello', hello);
+      tab.events.removeEventListener('error', failed);
+      if (error) reject(error); else resolve();
+    }
+    tab.events.addEventListener('hello', hello, { once: true });
+    tab.events.addEventListener('error', failed, { once: true });
+  });
+  tab.connected.catch(() => {});
+  tab.events.addEventListener('error', () => markDisconnected(tab, lease));
+  // 같은 틱에 리스너를 붙이므로 첫 SSE 이벤트를 놓치지 않는다.
+  const followHooks = {
+    canFollow: async () => saving ? 'SAVING' : opening > 0 ? 'BUSY'
+      : (await editorOf(tab).getDocumentState()).dirty ? 'DIRTY' : null,
+    onFollow: (targetId, token) => openDoc(targetId, { reservation: token, agent: true }),
+    onFollowEnd: msg => {
+      if (current?.lease !== lease) return;
+      if (msg.completion === 'committed') return say(`AI 편집 저장됨 · ${nameOf(id)}${msg.commit ? ' · 커밋 ' + msg.commit : ''}`);
+      if (msg.completion === 'unknown') return say(`AI 작업 결과 확인 필요(${msg.error ?? '알 수 없음'}) · 이 문서에 남습니다`);
+      if (msg.completion === 'none') return openDoc(msg.from, { restoreFrom: lease, reason: msg.error ?? '변경 없음' });
+    },
+  };
+  if (tab.editor) tab.stopAgent = startOfficeChannel({ events: tab.events, docId: id, lease, showStatus: say, setSaveLocked,
+    // 저장 중 전환은 switchTo가 막는다. 끊긴 탭을 save()가 스스로 다시 붙이는 정리는 막지 않는다.
+    isBusy: () => saving && current === tab && !tab.disconnected, ...followHooks,
+    onChanged: async () => {
+      if (current !== tab) return;
+      if ((await tab.editor.getDocumentState()).dirty) { say('AI가 이 문서를 바꿨습니다 · 저장하지 않은 편집이 있어 다시 읽지 않았습니다'); return; }
+      const fresh = await api(docUrl(id), { cache: 'no-store' });
+      const freshBytes = await fresh.arrayBuffer();
+      tab.etag = fresh.headers.get('ETag');
+      const src = needsConversion(tab.format)
+        ? await (await api(`/api/office/editable/${encodeURIComponent(id)}`)).arrayBuffer() : freshBytes;
+      await tab.editor.loadFile(src, id.split('/').at(-1));
+      say('AI 편집을 불러왔습니다');
+    } });
+  else tab.stopAgent = startAgentChannel({ editor: studio, events: tab.events, docId: id, lease,
+    getDiskSha: () => tab.etag.slice(1, -1),
+    setDiskSha: sha => { tab.etag = `"${sha}"`; },
+    showStatus: say, setSaveLocked,
+    putDocument: async (docId, body, meta) => {
+      const response = await api(docUrl(docId), { method: 'PUT', body, headers: {
+        'Content-Type': 'application/octet-stream', 'If-Match': `"${meta.ifMatch}"`,
+        'X-Lease': meta.lease, 'X-Document-Format': meta.format,
+        'X-Content-Loss-Report': btoa(JSON.stringify(meta.contentLoss)),
+        'X-Agent-Request-Id': meta.agentRequestId,
+      } });
+      const saved = await response.json();
+      tab.etag = `"${saved.sha256}"`;
+      return saved;
+    },
+    // agent.follow 판정. 저장 중·다른 전환 중·저장 안 한 편집이면 거절 코드, 아니면 null(수락).
+    ...followHooks,
+  });
+}
+
+// SSE가 끊긴 탭(서버 재시작·네트워크). 저장을 조용히 막지 않는다: 배경 재시도나 다음 ⌘S가 새 lease로 다시 붙인다.
+function markDisconnected(tab, lease) {
+  if (tab.lease !== lease || tab.retired || tab.disconnected) return;
+  tab.disconnected = true;
+  syncSaveButton();
+  if (current === tab) say('연결이 끊겼습니다 · 다시 연결하는 중');
+  scheduleReconnect(tab, 0);
+}
+const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 15000];
+function scheduleReconnect(tab, attempt) {
+  if (attempt >= RECONNECT_DELAYS.length) {
+    if (current === tab && tab.disconnected) say('연결이 끊겼습니다 · ⌘S로 다시 연결해 저장하거나 문서를 다시 여세요');
+    return;
+  }
+  setTimeout(async () => {
+    if (current !== tab || tab.retired || !tab.disconnected) return;
+    if (!(await reconnect(tab)) && current === tab && tab.disconnected && !tab.retired) scheduleReconnect(tab, attempt + 1);
+  }, RECONNECT_DELAYS[attempt]);
+}
+const releaseLease = lease => fetch(`/api/tabs/${encodeURIComponent(lease)}`, { method: 'DELETE' }).catch(() => {});
+// 끊긴 탭을 제자리에서 다시 붙인다(편집기와 편집 내용은 그대로). 서버는 SSE가 닫힐 때 옛 lease를 이미 풀었다.
+// 탭마다 한 번만 진행한다. 그사이 다른 문서로 옮겼으면 새로 받은 lease(지역 변수)를 바로 반납한다.
+function reconnect(tab) {
+  if (tab.retired) return Promise.resolve(false);
+  if (!tab.disconnected) return Promise.resolve(true);
+  tab.reconnecting ??= (async () => {
+    let lease = null;
+    try {
+      // 옛 채널 정리. 오피스·HWP 모두 저장 잠금을 푼다. 격리(LEASE_ISOLATED)·AI 작업 중(AGENT_BUSY)이면 던진다.
+      await tab.stopAgent?.();
+      tab.events?.close();
+      const response = await api('/api/tabs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ docId: tab.id }) });
+      lease = (await response.json()).lease;
+      if (current !== tab || tab.retired) { await releaseLease(lease); return false; }
+      tab.lease = lease;
+      connectTab(tab);
+      await tab.connected;
+      if (current !== tab || tab.retired) {
+        await tab.stopAgent?.().catch(() => {});
+        tab.events.close();
+        await releaseLease(lease);
+        return false;
+      }
+      tab.disconnected = false;
+      tab.reconnectError = null;
+      syncSaveButton();
+      say('다시 연결됨');
+      return true;
+    } catch (error) {
+      tab.reconnectError = error.message;
+      if (lease && tab.lease === lease) { await tab.stopAgent?.().catch(() => {}); tab.events?.close(); }
+      if (lease) await releaseLease(lease);
+      if (error.message === 'LEASE_ISOLATED' && current === tab) say('이 탭은 격리돼 새로고침해야 저장할 수 있습니다');
+      return false;
+    } finally { tab.reconnecting = null; }
+  })();
+  return tab.reconnecting;
+}
+
 async function save() {
-  if (!current || saving || agentLocked) return;
+  if (!current || saving) return;
+  // 저장 요청은 조용히 사라지지 않는다. 끊긴 연결은 아래에서 다시 붙이고, AI 잠금은 이유를 알린다.
+  if (agentLocked && !current.disconnected) { say('AI가 편집 중이라 지금은 저장할 수 없습니다'); return; }
   if (!isEditable(current.format)) {
     // 편집기가 있는 읽기 전용 형식(Pages)은 편집한 내용을 DOCX 사본으로 남긴다. 슬라이드는 서버가 PPTX 사본을 만든다.
     if (current.editor?.family === 'doc') return saveCopy('docx', { fromEditor: true });
@@ -301,6 +373,13 @@ async function save() {
   saveButton.disabled = true;
   const tab = current;
   try {
+    if (tab.disconnected) {
+      say('연결을 다시 붙이는 중');
+      if (!(await reconnect(tab))) {
+        say(`저장 실패: 연결이 끊겼습니다${tab.reconnectError ? `(${tab.reconnectError})` : ''} · 서버를 확인한 뒤 다시 ⌘S`);
+        return;
+      }
+    }
     say('저장 중');
     const exported = tab.editor ? await tab.editor.exportWithReport({ format: tab.format })
       : await studio.lidge.request('exportWithReport', { format: tab.format });
@@ -336,7 +415,7 @@ function syncSaveButton() {
     : family === 'doc' ? 'docx' : family === 'slides' && current.format !== 'pptx' ? 'pptx' : null;
   const copyOnly = Boolean(copyTarget);
   saveButton.textContent = copyOnly ? `${labelOf(copyTarget)} 사본` : '저장';
-  saveButton.disabled = !current || agentLocked || saving || (!isEditable(current.format) && !copyOnly);
+  saveButton.disabled = !current || (agentLocked && !current.disconnected) || saving || (!isEditable(current.format) && !copyOnly);
 }
 
 // 원본 옆에 다른 형식 사본을 만든다. fromEditor면 편집기 내보내기 바이트를, 아니면 서버 변환을 쓴다.
@@ -943,6 +1022,8 @@ async function importFiles(project, files) {
 }
 
 saveButton.addEventListener('click', () => { void save(); });
+// 셸 어디에 포커스가 있어도(목록·검색창·헤더·편집기 포털 메뉴) ⌘S는 브라우저 저장이 아니라 앱 저장이다.
+bindSaveShortcut(window, () => { void save(); });
 void loadDocs().catch(() => {});
 try {
   const { createStudio } = await import('/editor/index.js');
