@@ -37,3 +37,19 @@ Aside로 QA를 돌리다 나온 MCP 문제 두 개와, 문서함을 더 편하�
 | 3 | [#22](https://github.com/lidge-ai/lidge-hwp/issues/22) [#23](https://github.com/lidge-ai/lidge-hwp/issues/23) | 엔진: 글자 크기 변경이 쪽 나눔을 만들지 않게, 편집 뒤 쪽 수를 스냅숏과 같은 기준으로. WASM·CLI 재빌드 |
 
 서식·쪽 배치가 바뀌는 수정은 저장한 복사본을 한컴 한글에서 열어 쪽 수와 모양을 대조한다.
+
+## 2026-09-29 종이(Jongi): 여러 형식을 여는 문서 작업대
+
+HWP/HWPX는 지금의 rhwp 경로를 그대로 쓴다. 다른 형식은 형식 레지스트리(`lib/formats.mjs`) 뒤에 엔진을 따로 붙인다. 작업 브랜치 `codex/office-platform`, PR은 `dev`로.
+
+| 단계 | 내용 | 엔진 |
+|---|---|---|
+| 1 | 형식 레지스트리, 문서함·API가 모든 형식을 나열·저장, LibreOffice headless 변환 계층, 오피스 번들 빌드 | LibreOffice(soffice, 번들하지 않음) |
+| 2 | 시트 편집: xlsx·xls·ods·csv·Apple Numbers, Google Sheets 공유 링크 가져오기 | SheetJS CE, FortuneSheet, ExcelJS(xlsx 서식 보존) |
+| 3 | 문서 편집: docx, odt·rtf·doc은 docx로 바꿔 편집한 뒤 원래 형식으로 저장, 옛 Pages 가져오기 | docx-editor(Apache-2.0 부분만) |
+| 4 | 슬라이드: pptx·odp·ppt·key 미리보기와 사본 변환 | LibreOffice PDF + pdf.js |
+| 5 | 이름을 "종이(Jongi)"로, 셸 UI 새로 그리기 | - |
+| 6 | MCP `office_exec`: 시트 읽기·셀 쓰기, 문서 문단 읽기·바꾸기, 저장 전 재검증 | 위 엔진 |
+
+범위 밖: Google 쪽 되쓰기(OAuth 필요), pptx 본문 편집, 최신 Pages/Keynote 편집(LibreOffice가 열지 못함), Docker 문서 서버.
+LibreOffice가 필요한 테스트는 `npm run test:soffice`로 따로 돈다. 건너뛰지 않고, soffice가 없으면 실패한다.
