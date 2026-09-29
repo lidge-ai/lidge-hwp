@@ -93,12 +93,29 @@ npm start
     "lidge-hwp": {
       "command": "node",
       "args": ["/absolute/path/to/lidge-hwp/mcp/server.mjs"]
+    },
+    "jongi-office": {
+      "command": "node",
+      "args": ["/absolute/path/to/lidge-hwp/mcp/office-server.mjs"]
     }
   }
 }
 ```
 
-도구는 `hwp_exec` 하나다. 비동기 JavaScript 코드에서 `hwp` API를 사용한다.
+HWP/HWPX 도구는 `hwp_exec`(서버 `lidge-hwp`)다. 비동기 JavaScript 코드에서 `hwp` API를 사용한다.
+
+오피스 형식은 두 번째 서버 `jongi-office`의 `office_exec`가 맡는다. 코드 안의 전역은 `office` 하나다.
+
+```js
+const h = await office.open('예산.xlsx');
+await office.setCells(h, { start: 'B2', values: [[42, '=B2*2']] }); // '='로 시작하면 수식
+await office.save(h);
+```
+
+시트는 `office.sheets`·`office.read(h,{range})`·`office.setCells`, 문서(docx, odt·rtf·doc)는 `office.paragraphs`·`office.find`·`office.replaceText`·`office.appendParagraph`를 쓴다.
+저장은 호출 전체가 성공했을 때만 한 번 하고, 쓰기 전에 결과를 다시 열어 바꾼 값이 그대로인지 확인한다(다르면 `AGENT_VERIFY_MISMATCH`, 파일 무변경).
+xls·numbers·csv는 수식을 저장하지 못하므로 수식 입력을 `FORMULA_NOT_SAVED`로 거절한다. 슬라이드와 Pages는 읽기 전용이다.
+커밋 작성자는 `agent`이고, 그 문서를 연 편집기 탭은 저장하지 않은 편집이 없으면 새 내용을 다시 읽는다. `office.help()`가 전체 목록을 준다.
 
 ```js
 return await hwp.docs();
