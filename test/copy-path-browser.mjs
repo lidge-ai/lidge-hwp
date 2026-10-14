@@ -141,7 +141,7 @@ async function main() {
 
     await cdp.eval(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true,
       value: async value => { window.__writes.push(value); } });
-      document.querySelector('.doc[data-id="a.hwp"]').parentElement.querySelector('.doc-rename').click();`);
+      document.querySelector('.doc[data-id="a.hwp"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2 }));`);
     await until(() => cdp.eval(`return !!document.querySelector('.rename-input');`));
     const renameCopy = await cdp.eval(`const input = document.querySelector('.rename-input');
       const event = new KeyboardEvent('keydown', { key: 'C', code: 'KeyC', metaKey: true,

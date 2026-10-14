@@ -61,6 +61,8 @@ jobs:
         run: rustup show
       - name: Build WASM and Studio
         run: npm run build:studio
+      - name: Build office editors
+        run: npm run build:office
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: studio-build
@@ -100,7 +102,7 @@ jobs:
           name: studio-build
           path: build
       - name: Check build artifact
-        run: test -s build/wasm/rhwp_bg.wasm && test -s build/wasm/rhwp.js && test -s build/studio/index.html && test -s build/editor/index.js
+        run: test -s build/wasm/rhwp_bg.wasm && test -s build/wasm/rhwp.js && test -s build/studio/index.html && test -s build/editor/index.js && test -s build/office/sheet.js
       - name: Tests (shard ${{ matrix.shard }}/3)
         # 비공개 문서 픽스처 테스트는 배포하지 않으므로 skipped로 보고된다.
         run: node --test --test-shard=${{ matrix.shard }}/3 test/*.test.mjs
@@ -118,6 +120,24 @@ jobs:
         if: matrix.shard == 1
         working-directory: rhwp/npm/editor
         run: node --test tests/*.test.mjs
+
+  # LibreOffice가 필요한 변환 테스트. 건너뛰지 않는다(soffice가 없으면 실패).
+  soffice:
+    name: soffice
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '26'
+      - run: npm ci
+      - name: Install LibreOffice
+        run: brew install --cask libreoffice
+      - name: LibreOffice conversion tests
+        run: npm run test:soffice
 
   lint:
     name: lint
@@ -139,13 +159,13 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [build, test, lint]
+    needs: [build, test, lint, soffice]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Require every job to succeed
         env:
-          RESULTS: ${{ needs.build.result }} ${{ needs.test.result }} ${{ needs.lint.result }}
+          RESULTS: ${{ needs.build.result }} ${{ needs.test.result }} ${{ needs.lint.result }} ${{ needs.soffice.result }}
         run: |
-          echo "build test lint: $RESULTS"
+          echo "build test lint soffice: $RESULTS"
           for r in $RESULTS; do [ "$r" = success ] || exit 1; done

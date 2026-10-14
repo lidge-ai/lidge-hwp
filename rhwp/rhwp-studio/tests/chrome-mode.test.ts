@@ -178,6 +178,7 @@ test('main은 embed에서 문서 비교 표면을 등록·노출하지 않는다
 test('embed 저장·인쇄 단축키 판정은 문서 로드 여부와 무관한 순수 함수다', () => {
   const ev = (input: Partial<Parameters<typeof isEmbedSwallowedFileShortcut>[0]>) => ({
     key: '',
+    code: '',
     ctrlKey: false,
     metaKey: false,
     altKey: false,
@@ -191,6 +192,11 @@ test('embed 저장·인쇄 단축키 판정은 문서 로드 여부와 무관한
   // 한글 IME 키 — 전역 핸들러의 ㅜ/ㅐ 처리와 같은 이유.
   assert.equal(isEmbedSwallowedFileShortcut(ev({ key: 'ㄴ', ctrlKey: true })), true);
   assert.equal(isEmbedSwallowedFileShortcut(ev({ key: 'ㅔ', ctrlKey: true })), true);
+  // IME가 키를 먹으면 key가 'Process'로 온다 — 물리 키(code)로 판정한다.
+  assert.equal(isEmbedSwallowedFileShortcut(ev({ key: 'Process', code: 'KeyS', metaKey: true })), true);
+  assert.equal(isEmbedSwallowedFileShortcut(ev({ key: 'Process', code: 'KeyP', metaKey: true })), true);
+  assert.equal(isEmbedSwallowedFileShortcut(ev({ key: 'Process', code: 'KeyS' })), false);
+  assert.equal(isEmbedSwallowedFileShortcut(ev({ key: 'Process', code: 'KeyO', metaKey: true })), false);
   // Ctrl+O/Alt+N은 전역 단축키 핸들러가 문서 유무와 무관하게 이미 삼킨다.
   assert.equal(isEmbedSwallowedFileShortcut(ev({ key: 'o', ctrlKey: true })), false);
   assert.equal(isEmbedSwallowedFileShortcut(ev({ key: 's' })), false);
@@ -199,14 +205,14 @@ test('embed 저장·인쇄 단축키 판정은 문서 로드 여부와 무관한
   assert.equal(isEmbedSwallowedFileShortcut(ev({ key: 'p', ctrlKey: true, shiftKey: true })), true);
 
   // main 배선: capture 단계 리스너라 다이얼로그 등의 stopPropagation보다 먼저 돈다.
-  // Ctrl/Cmd+S(한글 IME ㄴ 포함, Alt·Shift 제외)는 file:save를 한 번 dispatch하고
+  // Ctrl/Cmd+S(물리 키 KeyS·한글 IME ㄴ 포함, Alt·Shift 제외)는 file:save를 한 번 dispatch하고
   // 전파를 끊는다 — embed 저장은 lidge 호스트 저장으로 간다. 나머지 파일 단축키는
   // 기존대로 preventDefault로만 삼킨다.
   const mainSource = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
   assert.match(mainSource, /if \(chromeMode === 'embed'\) \{[\s\S]*?document\.addEventListener\('keydown', \(e\) => \{\n\s*const \{ prevent, forward \} = hostShortcutDecision\(/);
   assert.match(mainSource, /e, e\.target, !!document\.querySelector\('\.modal-overlay, \.cp-overlay'\)/);
   assert.match(mainSource, /if \(prevent\) \{\n\s*e\.preventDefault\(\);\n\s*e\.stopImmediatePropagation\(\);\n\s*if \(forward\) requestLidgeHostAction\(forward\);\n\s*return;/);
-  assert.match(mainSource, /if \(\(e\.ctrlKey \|\| e\.metaKey\) && !e\.altKey && !e\.shiftKey\n\s*&& \(e\.key\.toLowerCase\(\) === 's' \|\| e\.key === 'ㄴ'\)\) \{\n\s*e\.preventDefault\(\);\n\s*e\.stopImmediatePropagation\(\);\n\s*dispatcher\.dispatch\('file:save'\);\n\s*return;\n\s*\}\n\s*if \(isEmbedSwallowedFileShortcut\(e\)\) e\.preventDefault\(\);\n\s*\}, true\);/);
+  assert.match(mainSource, /if \(\(e\.ctrlKey \|\| e\.metaKey\) && !e\.altKey && !e\.shiftKey\n\s*&& \(e\.code === 'KeyS' \|\| e\.key\.toLowerCase\(\) === 's' \|\| e\.key === 'ㄴ'\)\) \{\n\s*e\.preventDefault\(\);\n\s*e\.stopImmediatePropagation\(\);\n\s*dispatcher\.dispatch\('file:save'\);\n\s*return;\n\s*\}\n\s*if \(isEmbedSwallowedFileShortcut\(e\)\) e\.preventDefault\(\);\n\s*\}, true\);/);
   // dispatch 대상이 embed에서 등록돼 있어야 한다(미등록 dispatch는 무해한 no-op이다).
   // Save As는 저장 대상 경로를 바꿀 수 있으므로 계속 숨긴다.
   assert.equal(EMBED_HIDDEN_FILE_COMMAND_IDS.includes('file:save'), false);

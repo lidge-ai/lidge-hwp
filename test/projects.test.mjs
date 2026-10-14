@@ -116,7 +116,7 @@ test('renderProjects gives documents path labels and hides format/count badges f
   } finally { delete globalThis.document; }
 });
 
-test('renderProjects exposes rename button and context menu with the exact document id', () => {
+test('renderProjects renames by double-click, Enter on the open document, and context menu without a rename button', () => {
   globalThis.document = { createElement: fakeElement, createElementNS: (_ns, tag) => fakeElement(tag) };
   try {
     const key = '11111111-1111-4111-8111-111111111111';
@@ -129,16 +129,24 @@ test('renderProjects exposes rename button and context menu with the exact docum
       const list = fakeElement('ul');
       renderProjects(list, groups, { onRename: candidate => seen.push(candidate) });
       const nodes = walk(list);
-      const rename = nodes.find(node => node.className === 'doc-rename');
+      const doc = nodes.find(node => node.className === 'doc');
       const row = nodes.find(node => node.className === 'doc-row');
-      assert.ok(rename);
-      assert.match(rename.getAttribute('aria-label'), /이름 바꾸기$/);
-      rename.listeners.click[0]();
+      assert.equal(nodes.some(node => node.className === 'doc-rename'), false);
+      assert.equal(doc.getAttribute('aria-keyshortcuts'), 'F2 Meta+Shift+R');
+      const enter = (extra = {}) => { let prevented = false;
+        doc.listeners.keydown[0]({ key: 'Enter', ...extra, preventDefault() { prevented = true; } }); return prevented; };
+      // 열리지 않은 문서의 Enter는 열기(버튼 기본 동작)로 둔다.
+      assert.equal(enter(), false);
+      doc.listeners.dblclick[0]({ preventDefault() {} });
       let prevented = false;
       row.listeners.contextmenu[0]({ preventDefault() { prevented = true; } });
       assert.equal(prevented, true);
+      doc.setAttribute('aria-current', 'true');
+      assert.equal(enter({ isComposing: true }), false);
+      assert.equal(enter({ shiftKey: true }), false);
+      assert.equal(enter(), true);
     }
-    assert.deepEqual(seen, ['P/a.hwp', 'P/a.hwp', id, id]);
+    assert.deepEqual(seen, ['P/a.hwp', 'P/a.hwp', 'P/a.hwp', id, id, id]);
   } finally { delete globalThis.document; }
 });
 

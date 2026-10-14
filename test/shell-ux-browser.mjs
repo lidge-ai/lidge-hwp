@@ -13,7 +13,7 @@ await withBrowser({ files: ['P/a.hwp'] }, async ({ cdp, server, scratch }) => {
     inert: document.querySelector('#studio iframe').inert,
     shortcuts: [document.querySelector('#new-doc').getAttribute('aria-keyshortcuts'),
       document.querySelector('#copy-path').getAttribute('aria-keyshortcuts'),
-      document.querySelector('.doc-rename').getAttribute('aria-keyshortcuts')] };`);
+      document.querySelector('.doc').getAttribute('aria-keyshortcuts')] };`);
   assert.equal(initial.shell, 'empty');
   assert.match(initial.message, /목록에서 문서를 선택/);
   assert.equal(initial.iframeTitle, '한글 문서 편집기');

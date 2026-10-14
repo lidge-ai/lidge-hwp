@@ -89,7 +89,9 @@ test('rename controls, F2 handling, and inline focus styles are served', async t
   assert.match(shortcuts, /event\.code === 'F2'/);
   assert.match(shortcuts, /event\.shiftKey && !event\.altKey/);
   assert.match(app, /candidateId = id\.slice/);
-  assert.match(projects, /className = 'doc-rename'/);
+  assert.doesNotMatch(projects, /doc-rename/);
+  assert.match(projects, /addEventListener\('dblclick'/);
+  assert.match(projects, /getAttribute\('aria-current'\) !== 'true'/);
   assert.match(projects, /contextmenu/);
   assert.match(css, /\.doc-edit input:focus-visible/);
 });

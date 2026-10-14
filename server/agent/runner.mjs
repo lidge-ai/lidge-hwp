@@ -19,6 +19,7 @@ import { createPageView } from '../../lib/page-view.mjs';
 import { EXPORTS_ROOT, RHWP_BIN } from '../../lib/config.mjs';
 const MUTATE_HELPERS = { format, paraFormat, applyStyle, ...STRUCTURE };
 import { contentSignature } from '../../lib/signature.mjs';
+import { familyOf } from '../../lib/formats.mjs';
 // 탭이 agent.release에 답할 한도. 채널은 진행 중인 apply가 확정될 때까지 release를 미루므로 apply 뒤처리 시간을 덮는다.
 const RELEASE_DEADLINE_MS = 45000;
 // snapshot inline: 한 hwp_exec 결과에 붙이는 쪽 이미지 수와 기본 긴 변(px). 모델이 읽기 충분하고 결과가 커지지 않는 값이다.
@@ -185,7 +186,8 @@ export async function runAgent({ code, timeoutMs = 30000 },
   const hostSerial = (name, args) => { const next = hostChain.then(() => host(name, args)); hostChain = next.catch(() => {}); return next; };
   const host = async (name, args) => {
     if (closed) throw new Error('invocation closed');
-    if (name === 'docs') return store.list();
+    // 문서함은 모든 형식을 나열하지만 hwp_exec는 HWP/HWPX만 다룬다(예전과 같은 결과). 오피스 형식은 office_exec.
+    if (name === 'docs') return (await store.list()).filter(doc => familyOf(doc.format) === 'hwp');
     if (name === 'help') return apiHelp(HELPERS);
     if (name === 'selectAll') return selectAll();
     if (name === 'open') {
@@ -204,7 +206,9 @@ export async function runAgent({ code, timeoutMs = 30000 },
         throw new Error('one document per invocation');
       }
       opened = true; // 비동기 작업 전에 자리를 먼저 잡는다
-      await store.resolveId(id);
+      const { format: openFormat } = await store.resolveId(id);
+      if (familyOf(openFormat) !== 'hwp')
+        throw Object.assign(new Error('FORMAT_UNSUPPORTED'), { code: 'FORMAT_UNSUPPORTED', details: { format: openFormat, use: 'office_exec' } });
       attemptedDocId = id;
       lockToken = store.lock(id);
       if (!lockToken) throw new Error('DOCUMENT_LOCKED');

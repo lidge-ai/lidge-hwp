@@ -3,6 +3,7 @@ import { mkdir, chmod, lstat, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { AGENT_SOCK } from '../../lib/config.mjs';
 import { runAgent } from './runner.mjs';
+import { runOfficeAgent } from './office-runner.mjs';
 export async function startAgentSocket({ store, tabs, config }) {
   const socketPath = config.socketPath ?? AGENT_SOCK;
   await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
@@ -29,7 +30,9 @@ export async function startAgentSocket({ store, tabs, config }) {
         if (typeof req.id !== 'string' || typeof req.code !== 'string') throw new Error('invalid request');
         // 코드 뒤로 apply 120초 + PUT 꼬리 + release 45초(runner.mjs RELEASE_DEADLINE_MS)
         conn.setTimeout(Math.max(config.socketTimeoutMs ?? 240000, (req.timeoutMs ?? 30000) + 210000));
-        return runAgent({ code: req.code, timeoutMs: req.timeoutMs }, { store, tabs, config })
+        // tool:'office'는 office_exec(mcp/office-server.mjs). 없으면 예전처럼 hwp_exec.
+        const run = req.tool === 'office' ? runOfficeAgent : runAgent;
+        return run({ code: req.code, timeoutMs: req.timeoutMs }, { store, tabs, config: req.tool === 'office' ? (config.office ?? {}) : config })
           .then(out => ({ id: req.id, ...out }));
       }).catch(e => ({ id: null, ok: false, error: String(e.message ?? e), logs: [], elapsedMs: 0, saved: [] }))
         .then(out => conn.end(JSON.stringify(out) + '\n'));
